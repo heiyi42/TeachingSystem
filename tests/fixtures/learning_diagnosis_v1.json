@@ -1,0 +1,2808 @@
+{
+  "schema_version": 1,
+  "name": "训练中心过程诊断构造评测集 v1",
+  "provenance": "由开发助手按规则独立推导固定参考轨迹，再设置错误变体；未使用待测求解器生成参考答案，未经过教师复核。",
+  "limitations": "12 道基础题的变体并非 108 个独立样本；用于工程诊断评测，不是真实学生学习效果试验。",
+  "problems": [
+    {
+      "id": "eval_lru_a",
+      "algorithm": "LRU",
+      "kind": "page_replacement",
+      "parameters": {
+        "frames": 2,
+        "sequence": [
+          4,
+          5,
+          4,
+          6,
+          5,
+          7,
+          4
+        ]
+      },
+      "focus": "命中后的置换与连续缺页",
+      "reference_reasoning": "命中时更新最近访问位置；置换时选择最近访问位置最早的驻留页。",
+      "gold_rows": [
+        {
+          "frames": "4",
+          "event": "fault",
+          "evicted": "—"
+        },
+        {
+          "frames": "4, 5",
+          "event": "fault",
+          "evicted": "—"
+        },
+        {
+          "frames": "4, 5",
+          "event": "hit",
+          "evicted": "—"
+        },
+        {
+          "frames": "4, 6",
+          "event": "fault",
+          "evicted": "5"
+        },
+        {
+          "frames": "5, 6",
+          "event": "fault",
+          "evicted": "4"
+        },
+        {
+          "frames": "5, 7",
+          "event": "fault",
+          "evicted": "6"
+        },
+        {
+          "frames": "4, 7",
+          "event": "fault",
+          "evicted": "5"
+        }
+      ],
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "equivalent",
+          "changes": [
+            {
+              "step": 1,
+              "field": "frames",
+              "value": "04"
+            },
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "05，04"
+            },
+            {
+              "step": 3,
+              "field": "frames",
+              "value": "05，04"
+            },
+            {
+              "step": 4,
+              "field": "frames",
+              "value": "06，04"
+            },
+            {
+              "step": 5,
+              "field": "frames",
+              "value": "06，05"
+            },
+            {
+              "step": 6,
+              "field": "frames",
+              "value": "07，05"
+            },
+            {
+              "step": 7,
+              "field": "frames",
+              "value": "07，04"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "wrong_event",
+          "changes": [
+            {
+              "step": 3,
+              "field": "event",
+              "value": "fault"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 3,
+            "error_code": "wrong_event",
+            "field": "event"
+          }
+        },
+        {
+          "id": "wrong_victim",
+          "changes": [
+            {
+              "step": 4,
+              "field": "evicted",
+              "value": "4"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 4,
+            "error_code": "wrong_victim",
+            "field": "evicted"
+          }
+        },
+        {
+          "id": "wrong_frames",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "4, 6"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_frames",
+            "field": "frames"
+          }
+        },
+        {
+          "id": "cascading",
+          "changes": [
+            {
+              "step": 4,
+              "field": "evicted",
+              "value": "4"
+            },
+            {
+              "step": 5,
+              "field": "frames",
+              "value": "5, 4"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 4,
+            "error_code": "wrong_victim",
+            "field": "evicted"
+          }
+        },
+        {
+          "id": "incomplete",
+          "changes": [
+            {
+              "step": 2,
+              "field": "event",
+              "value": ""
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 2,
+            "error_code": "incomplete",
+            "field": "event"
+          }
+        },
+        {
+          "id": "invalid_number",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "1, x"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "duplicate_frame",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "4, 4"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval_lru_b",
+      "algorithm": "LRU",
+      "kind": "page_replacement",
+      "parameters": {
+        "frames": 3,
+        "sequence": [
+          8,
+          6,
+          9,
+          6,
+          8,
+          2,
+          9,
+          5,
+          6
+        ]
+      },
+      "focus": "连续命中改变 LRU 最近使用次序",
+      "reference_reasoning": "命中时更新最近访问位置；置换时选择最近访问位置最早的驻留页。",
+      "gold_rows": [
+        {
+          "frames": "8",
+          "event": "fault",
+          "evicted": "—"
+        },
+        {
+          "frames": "6, 8",
+          "event": "fault",
+          "evicted": "—"
+        },
+        {
+          "frames": "6, 8, 9",
+          "event": "fault",
+          "evicted": "—"
+        },
+        {
+          "frames": "6, 8, 9",
+          "event": "hit",
+          "evicted": "—"
+        },
+        {
+          "frames": "6, 8, 9",
+          "event": "hit",
+          "evicted": "—"
+        },
+        {
+          "frames": "2, 6, 8",
+          "event": "fault",
+          "evicted": "9"
+        },
+        {
+          "frames": "2, 8, 9",
+          "event": "fault",
+          "evicted": "6"
+        },
+        {
+          "frames": "2, 5, 9",
+          "event": "fault",
+          "evicted": "8"
+        },
+        {
+          "frames": "5, 6, 9",
+          "event": "fault",
+          "evicted": "2"
+        }
+      ],
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "equivalent",
+          "changes": [
+            {
+              "step": 1,
+              "field": "frames",
+              "value": "08"
+            },
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "08，06"
+            },
+            {
+              "step": 3,
+              "field": "frames",
+              "value": "09，08，06"
+            },
+            {
+              "step": 4,
+              "field": "frames",
+              "value": "09，08，06"
+            },
+            {
+              "step": 5,
+              "field": "frames",
+              "value": "09，08，06"
+            },
+            {
+              "step": 6,
+              "field": "frames",
+              "value": "08，06，02"
+            },
+            {
+              "step": 7,
+              "field": "frames",
+              "value": "09，08，02"
+            },
+            {
+              "step": 8,
+              "field": "frames",
+              "value": "09，05，02"
+            },
+            {
+              "step": 9,
+              "field": "frames",
+              "value": "09，06，05"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "wrong_event",
+          "changes": [
+            {
+              "step": 3,
+              "field": "event",
+              "value": "hit"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 3,
+            "error_code": "wrong_event",
+            "field": "event"
+          }
+        },
+        {
+          "id": "wrong_victim",
+          "changes": [
+            {
+              "step": 6,
+              "field": "evicted",
+              "value": "6"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 6,
+            "error_code": "wrong_victim",
+            "field": "evicted"
+          }
+        },
+        {
+          "id": "wrong_frames",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "6, 9"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_frames",
+            "field": "frames"
+          }
+        },
+        {
+          "id": "cascading",
+          "changes": [
+            {
+              "step": 6,
+              "field": "evicted",
+              "value": "6"
+            },
+            {
+              "step": 7,
+              "field": "frames",
+              "value": "2, 8, 6"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 6,
+            "error_code": "wrong_victim",
+            "field": "evicted"
+          }
+        },
+        {
+          "id": "incomplete",
+          "changes": [
+            {
+              "step": 2,
+              "field": "event",
+              "value": ""
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 2,
+            "error_code": "incomplete",
+            "field": "event"
+          }
+        },
+        {
+          "id": "invalid_number",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "1, x"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "duplicate_frame",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "4, 4"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval_lru_c",
+      "algorithm": "LRU",
+      "kind": "page_replacement",
+      "parameters": {
+        "frames": 1,
+        "sequence": [
+          0,
+          0,
+          3,
+          3,
+          0,
+          8
+        ]
+      },
+      "focus": "单页框、页面零和连续命中",
+      "reference_reasoning": "命中时更新最近访问位置；置换时选择最近访问位置最早的驻留页。",
+      "gold_rows": [
+        {
+          "frames": "0",
+          "event": "fault",
+          "evicted": "—"
+        },
+        {
+          "frames": "0",
+          "event": "hit",
+          "evicted": "—"
+        },
+        {
+          "frames": "3",
+          "event": "fault",
+          "evicted": "0"
+        },
+        {
+          "frames": "3",
+          "event": "hit",
+          "evicted": "—"
+        },
+        {
+          "frames": "0",
+          "event": "fault",
+          "evicted": "3"
+        },
+        {
+          "frames": "8",
+          "event": "fault",
+          "evicted": "0"
+        }
+      ],
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "equivalent",
+          "changes": [
+            {
+              "step": 1,
+              "field": "frames",
+              "value": "00"
+            },
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "00"
+            },
+            {
+              "step": 3,
+              "field": "frames",
+              "value": "03"
+            },
+            {
+              "step": 4,
+              "field": "frames",
+              "value": "03"
+            },
+            {
+              "step": 5,
+              "field": "frames",
+              "value": "00"
+            },
+            {
+              "step": 6,
+              "field": "frames",
+              "value": "08"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "wrong_event",
+          "changes": [
+            {
+              "step": 3,
+              "field": "event",
+              "value": "hit"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 3,
+            "error_code": "wrong_event",
+            "field": "event"
+          }
+        },
+        {
+          "id": "wrong_victim",
+          "changes": [
+            {
+              "step": 3,
+              "field": "evicted",
+              "value": "—"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 3,
+            "error_code": "wrong_victim",
+            "field": "evicted"
+          }
+        },
+        {
+          "id": "wrong_frames",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "3"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_frames",
+            "field": "frames"
+          }
+        },
+        {
+          "id": "cascading",
+          "changes": [
+            {
+              "step": 3,
+              "field": "evicted",
+              "value": "—"
+            },
+            {
+              "step": 4,
+              "field": "frames",
+              "value": "0"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 3,
+            "error_code": "wrong_victim",
+            "field": "evicted"
+          }
+        },
+        {
+          "id": "incomplete",
+          "changes": [
+            {
+              "step": 2,
+              "field": "event",
+              "value": ""
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 2,
+            "error_code": "incomplete",
+            "field": "event"
+          }
+        },
+        {
+          "id": "invalid_number",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "1, x"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "duplicate_frame",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "4, 4"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval_fifo_a",
+      "algorithm": "FIFO",
+      "kind": "page_replacement",
+      "parameters": {
+        "frames": 2,
+        "sequence": [
+          4,
+          5,
+          4,
+          6,
+          5,
+          7,
+          4
+        ]
+      },
+      "focus": "命中后的置换与连续缺页",
+      "reference_reasoning": "按装入时间排队；命中不移动队列，置换队首页。",
+      "gold_rows": [
+        {
+          "frames": "4",
+          "event": "fault",
+          "evicted": "—"
+        },
+        {
+          "frames": "4, 5",
+          "event": "fault",
+          "evicted": "—"
+        },
+        {
+          "frames": "4, 5",
+          "event": "hit",
+          "evicted": "—"
+        },
+        {
+          "frames": "5, 6",
+          "event": "fault",
+          "evicted": "4"
+        },
+        {
+          "frames": "5, 6",
+          "event": "hit",
+          "evicted": "—"
+        },
+        {
+          "frames": "6, 7",
+          "event": "fault",
+          "evicted": "5"
+        },
+        {
+          "frames": "4, 7",
+          "event": "fault",
+          "evicted": "6"
+        }
+      ],
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "equivalent",
+          "changes": [
+            {
+              "step": 1,
+              "field": "frames",
+              "value": "04"
+            },
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "05，04"
+            },
+            {
+              "step": 3,
+              "field": "frames",
+              "value": "05，04"
+            },
+            {
+              "step": 4,
+              "field": "frames",
+              "value": "06，05"
+            },
+            {
+              "step": 5,
+              "field": "frames",
+              "value": "06，05"
+            },
+            {
+              "step": 6,
+              "field": "frames",
+              "value": "07，06"
+            },
+            {
+              "step": 7,
+              "field": "frames",
+              "value": "07，04"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "wrong_event",
+          "changes": [
+            {
+              "step": 3,
+              "field": "event",
+              "value": "fault"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 3,
+            "error_code": "wrong_event",
+            "field": "event"
+          }
+        },
+        {
+          "id": "wrong_victim",
+          "changes": [
+            {
+              "step": 4,
+              "field": "evicted",
+              "value": "5"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 4,
+            "error_code": "wrong_victim",
+            "field": "evicted"
+          }
+        },
+        {
+          "id": "wrong_frames",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "4, 6"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_frames",
+            "field": "frames"
+          }
+        },
+        {
+          "id": "cascading",
+          "changes": [
+            {
+              "step": 4,
+              "field": "evicted",
+              "value": "5"
+            },
+            {
+              "step": 5,
+              "field": "frames",
+              "value": "5, 4"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 4,
+            "error_code": "wrong_victim",
+            "field": "evicted"
+          }
+        },
+        {
+          "id": "incomplete",
+          "changes": [
+            {
+              "step": 2,
+              "field": "event",
+              "value": ""
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 2,
+            "error_code": "incomplete",
+            "field": "event"
+          }
+        },
+        {
+          "id": "invalid_number",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "1, x"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "duplicate_frame",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "4, 4"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval_fifo_b",
+      "algorithm": "FIFO",
+      "kind": "page_replacement",
+      "parameters": {
+        "frames": 3,
+        "sequence": [
+          8,
+          6,
+          9,
+          6,
+          8,
+          2,
+          9,
+          5,
+          6
+        ]
+      },
+      "focus": "连续命中改变 LRU 最近使用次序",
+      "reference_reasoning": "按装入时间排队；命中不移动队列，置换队首页。",
+      "gold_rows": [
+        {
+          "frames": "8",
+          "event": "fault",
+          "evicted": "—"
+        },
+        {
+          "frames": "6, 8",
+          "event": "fault",
+          "evicted": "—"
+        },
+        {
+          "frames": "6, 8, 9",
+          "event": "fault",
+          "evicted": "—"
+        },
+        {
+          "frames": "6, 8, 9",
+          "event": "hit",
+          "evicted": "—"
+        },
+        {
+          "frames": "6, 8, 9",
+          "event": "hit",
+          "evicted": "—"
+        },
+        {
+          "frames": "2, 6, 9",
+          "event": "fault",
+          "evicted": "8"
+        },
+        {
+          "frames": "2, 6, 9",
+          "event": "hit",
+          "evicted": "—"
+        },
+        {
+          "frames": "2, 5, 9",
+          "event": "fault",
+          "evicted": "6"
+        },
+        {
+          "frames": "2, 5, 6",
+          "event": "fault",
+          "evicted": "9"
+        }
+      ],
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "equivalent",
+          "changes": [
+            {
+              "step": 1,
+              "field": "frames",
+              "value": "08"
+            },
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "08，06"
+            },
+            {
+              "step": 3,
+              "field": "frames",
+              "value": "09，08，06"
+            },
+            {
+              "step": 4,
+              "field": "frames",
+              "value": "09，08，06"
+            },
+            {
+              "step": 5,
+              "field": "frames",
+              "value": "09，08，06"
+            },
+            {
+              "step": 6,
+              "field": "frames",
+              "value": "09，06，02"
+            },
+            {
+              "step": 7,
+              "field": "frames",
+              "value": "09，06，02"
+            },
+            {
+              "step": 8,
+              "field": "frames",
+              "value": "09，05，02"
+            },
+            {
+              "step": 9,
+              "field": "frames",
+              "value": "06，05，02"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "wrong_event",
+          "changes": [
+            {
+              "step": 3,
+              "field": "event",
+              "value": "hit"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 3,
+            "error_code": "wrong_event",
+            "field": "event"
+          }
+        },
+        {
+          "id": "wrong_victim",
+          "changes": [
+            {
+              "step": 6,
+              "field": "evicted",
+              "value": "6"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 6,
+            "error_code": "wrong_victim",
+            "field": "evicted"
+          }
+        },
+        {
+          "id": "wrong_frames",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "6, 9"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_frames",
+            "field": "frames"
+          }
+        },
+        {
+          "id": "cascading",
+          "changes": [
+            {
+              "step": 6,
+              "field": "evicted",
+              "value": "6"
+            },
+            {
+              "step": 7,
+              "field": "frames",
+              "value": "2, 6, 8"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 6,
+            "error_code": "wrong_victim",
+            "field": "evicted"
+          }
+        },
+        {
+          "id": "incomplete",
+          "changes": [
+            {
+              "step": 2,
+              "field": "event",
+              "value": ""
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 2,
+            "error_code": "incomplete",
+            "field": "event"
+          }
+        },
+        {
+          "id": "invalid_number",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "1, x"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "duplicate_frame",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "4, 4"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval_fifo_c",
+      "algorithm": "FIFO",
+      "kind": "page_replacement",
+      "parameters": {
+        "frames": 1,
+        "sequence": [
+          0,
+          0,
+          3,
+          3,
+          0,
+          8
+        ]
+      },
+      "focus": "单页框、页面零和连续命中",
+      "reference_reasoning": "按装入时间排队；命中不移动队列，置换队首页。",
+      "gold_rows": [
+        {
+          "frames": "0",
+          "event": "fault",
+          "evicted": "—"
+        },
+        {
+          "frames": "0",
+          "event": "hit",
+          "evicted": "—"
+        },
+        {
+          "frames": "3",
+          "event": "fault",
+          "evicted": "0"
+        },
+        {
+          "frames": "3",
+          "event": "hit",
+          "evicted": "—"
+        },
+        {
+          "frames": "0",
+          "event": "fault",
+          "evicted": "3"
+        },
+        {
+          "frames": "8",
+          "event": "fault",
+          "evicted": "0"
+        }
+      ],
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "equivalent",
+          "changes": [
+            {
+              "step": 1,
+              "field": "frames",
+              "value": "00"
+            },
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "00"
+            },
+            {
+              "step": 3,
+              "field": "frames",
+              "value": "03"
+            },
+            {
+              "step": 4,
+              "field": "frames",
+              "value": "03"
+            },
+            {
+              "step": 5,
+              "field": "frames",
+              "value": "00"
+            },
+            {
+              "step": 6,
+              "field": "frames",
+              "value": "08"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "wrong_event",
+          "changes": [
+            {
+              "step": 3,
+              "field": "event",
+              "value": "hit"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 3,
+            "error_code": "wrong_event",
+            "field": "event"
+          }
+        },
+        {
+          "id": "wrong_victim",
+          "changes": [
+            {
+              "step": 3,
+              "field": "evicted",
+              "value": "—"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 3,
+            "error_code": "wrong_victim",
+            "field": "evicted"
+          }
+        },
+        {
+          "id": "wrong_frames",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "3"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_frames",
+            "field": "frames"
+          }
+        },
+        {
+          "id": "cascading",
+          "changes": [
+            {
+              "step": 3,
+              "field": "evicted",
+              "value": "—"
+            },
+            {
+              "step": 4,
+              "field": "frames",
+              "value": "0"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 3,
+            "error_code": "wrong_victim",
+            "field": "evicted"
+          }
+        },
+        {
+          "id": "incomplete",
+          "changes": [
+            {
+              "step": 2,
+              "field": "event",
+              "value": ""
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 2,
+            "error_code": "incomplete",
+            "field": "event"
+          }
+        },
+        {
+          "id": "invalid_number",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "1, x"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "duplicate_frame",
+          "changes": [
+            {
+              "step": 2,
+              "field": "frames",
+              "value": "4, 4"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval_fcfs_a",
+      "algorithm": "FCFS",
+      "kind": "cpu_scheduling",
+      "parameters": {
+        "processes": [
+          {
+            "name": "P1",
+            "arrival": 3,
+            "service": 2
+          },
+          {
+            "name": "P2",
+            "arrival": 0,
+            "service": 4
+          },
+          {
+            "name": "P3",
+            "arrival": 3,
+            "service": 1
+          }
+        ],
+        "quantum": null
+      },
+      "focus": "输入顺序不同于到达顺序，RR 连续执行同一进程",
+      "reference_reasoning": "同到达时间按数字编号升序；忽略切换开销；空闲时跳到下一到达时刻。FCFS 非抢占执行至完成。",
+      "gold_rows": [
+        {
+          "process": "P2",
+          "start": "0",
+          "end": "4"
+        },
+        {
+          "process": "P1",
+          "start": "4",
+          "end": "6"
+        },
+        {
+          "process": "P3",
+          "start": "6",
+          "end": "7"
+        }
+      ],
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "equivalent",
+          "changes": [
+            {
+              "step": 1,
+              "field": "process",
+              "value": "p2"
+            },
+            {
+              "step": 2,
+              "field": "process",
+              "value": "p1"
+            },
+            {
+              "step": 3,
+              "field": "process",
+              "value": "p3"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "wrong_order",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P2"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_order",
+            "field": "process"
+          }
+        },
+        {
+          "id": "wrong_time",
+          "changes": [
+            {
+              "step": 2,
+              "field": "end",
+              "value": "7"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_time",
+            "field": "end"
+          }
+        },
+        {
+          "id": "cascading",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P2"
+            },
+            {
+              "step": 3,
+              "field": "end",
+              "value": "8"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_order",
+            "field": "process"
+          }
+        },
+        {
+          "id": "missing_segment",
+          "changes": [],
+          "drop_last": true,
+          "append": null,
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 3,
+            "error_code": "incomplete",
+            "field": "process"
+          }
+        },
+        {
+          "id": "extra_segment",
+          "changes": [],
+          "drop_last": false,
+          "append": {
+            "process": "P2",
+            "start": "7",
+            "end": "8"
+          },
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 4,
+            "error_code": "extra_segment",
+            "field": "process"
+          }
+        },
+        {
+          "id": "invalid_number",
+          "changes": [
+            {
+              "step": 2,
+              "field": "start",
+              "value": "-1"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "unknown_process",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P999"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval_fcfs_b",
+      "algorithm": "FCFS",
+      "kind": "cpu_scheduling",
+      "parameters": {
+        "processes": [
+          {
+            "name": "P10",
+            "arrival": 0,
+            "service": 3
+          },
+          {
+            "name": "P2",
+            "arrival": 0,
+            "service": 1
+          },
+          {
+            "name": "P1",
+            "arrival": 2,
+            "service": 2
+          }
+        ],
+        "quantum": null
+      },
+      "focus": "同时到达按数值编号排序，P2 应先于 P10",
+      "reference_reasoning": "同到达时间按数字编号升序；忽略切换开销；空闲时跳到下一到达时刻。FCFS 非抢占执行至完成。",
+      "gold_rows": [
+        {
+          "process": "P2",
+          "start": "0",
+          "end": "1"
+        },
+        {
+          "process": "P10",
+          "start": "1",
+          "end": "4"
+        },
+        {
+          "process": "P1",
+          "start": "4",
+          "end": "6"
+        }
+      ],
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "equivalent",
+          "changes": [
+            {
+              "step": 1,
+              "field": "process",
+              "value": "p2"
+            },
+            {
+              "step": 2,
+              "field": "process",
+              "value": "p10"
+            },
+            {
+              "step": 3,
+              "field": "process",
+              "value": "p1"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "wrong_order",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P2"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_order",
+            "field": "process"
+          }
+        },
+        {
+          "id": "wrong_time",
+          "changes": [
+            {
+              "step": 2,
+              "field": "end",
+              "value": "5"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_time",
+            "field": "end"
+          }
+        },
+        {
+          "id": "cascading",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P2"
+            },
+            {
+              "step": 3,
+              "field": "end",
+              "value": "7"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_order",
+            "field": "process"
+          }
+        },
+        {
+          "id": "missing_segment",
+          "changes": [],
+          "drop_last": true,
+          "append": null,
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 3,
+            "error_code": "incomplete",
+            "field": "process"
+          }
+        },
+        {
+          "id": "extra_segment",
+          "changes": [],
+          "drop_last": false,
+          "append": {
+            "process": "P2",
+            "start": "6",
+            "end": "7"
+          },
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 4,
+            "error_code": "extra_segment",
+            "field": "process"
+          }
+        },
+        {
+          "id": "invalid_number",
+          "changes": [
+            {
+              "step": 2,
+              "field": "start",
+              "value": "-1"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "unknown_process",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P999"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval_fcfs_c",
+      "algorithm": "FCFS",
+      "kind": "cpu_scheduling",
+      "parameters": {
+        "processes": [
+          {
+            "name": "P1",
+            "arrival": 2,
+            "service": 1
+          },
+          {
+            "name": "P2",
+            "arrival": 7,
+            "service": 5
+          },
+          {
+            "name": "P3",
+            "arrival": 8,
+            "service": 2
+          }
+        ],
+        "quantum": null
+      },
+      "focus": "初始空闲、中途空闲和不足一个时间片",
+      "reference_reasoning": "同到达时间按数字编号升序；忽略切换开销；空闲时跳到下一到达时刻。FCFS 非抢占执行至完成。",
+      "gold_rows": [
+        {
+          "process": "P1",
+          "start": "2",
+          "end": "3"
+        },
+        {
+          "process": "P2",
+          "start": "7",
+          "end": "12"
+        },
+        {
+          "process": "P3",
+          "start": "12",
+          "end": "14"
+        }
+      ],
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "equivalent",
+          "changes": [
+            {
+              "step": 1,
+              "field": "process",
+              "value": "p1"
+            },
+            {
+              "step": 2,
+              "field": "process",
+              "value": "p2"
+            },
+            {
+              "step": 3,
+              "field": "process",
+              "value": "p3"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "wrong_order",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P1"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_order",
+            "field": "process"
+          }
+        },
+        {
+          "id": "wrong_time",
+          "changes": [
+            {
+              "step": 2,
+              "field": "end",
+              "value": "13"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_time",
+            "field": "end"
+          }
+        },
+        {
+          "id": "cascading",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P1"
+            },
+            {
+              "step": 3,
+              "field": "end",
+              "value": "15"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_order",
+            "field": "process"
+          }
+        },
+        {
+          "id": "missing_segment",
+          "changes": [],
+          "drop_last": true,
+          "append": null,
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 3,
+            "error_code": "incomplete",
+            "field": "process"
+          }
+        },
+        {
+          "id": "extra_segment",
+          "changes": [],
+          "drop_last": false,
+          "append": {
+            "process": "P1",
+            "start": "14",
+            "end": "15"
+          },
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 4,
+            "error_code": "extra_segment",
+            "field": "process"
+          }
+        },
+        {
+          "id": "invalid_number",
+          "changes": [
+            {
+              "step": 2,
+              "field": "start",
+              "value": "-1"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "unknown_process",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P999"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval_rr_a",
+      "algorithm": "RR",
+      "kind": "cpu_scheduling",
+      "parameters": {
+        "processes": [
+          {
+            "name": "P1",
+            "arrival": 3,
+            "service": 2
+          },
+          {
+            "name": "P2",
+            "arrival": 0,
+            "service": 4
+          },
+          {
+            "name": "P3",
+            "arrival": 3,
+            "service": 1
+          }
+        ],
+        "quantum": 2
+      },
+      "focus": "输入顺序不同于到达顺序，RR 连续执行同一进程",
+      "reference_reasoning": "同到达时间按数字编号升序；忽略切换开销；空闲时跳到下一到达时刻。RR 每个时间片一行，片末到达者先入队，当前未完成进程后入队。",
+      "gold_rows": [
+        {
+          "process": "P2",
+          "start": "0",
+          "end": "2"
+        },
+        {
+          "process": "P2",
+          "start": "2",
+          "end": "4"
+        },
+        {
+          "process": "P1",
+          "start": "4",
+          "end": "6"
+        },
+        {
+          "process": "P3",
+          "start": "6",
+          "end": "7"
+        }
+      ],
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "equivalent",
+          "changes": [
+            {
+              "step": 1,
+              "field": "process",
+              "value": "p2"
+            },
+            {
+              "step": 2,
+              "field": "process",
+              "value": "p2"
+            },
+            {
+              "step": 3,
+              "field": "process",
+              "value": "p1"
+            },
+            {
+              "step": 4,
+              "field": "process",
+              "value": "p3"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "wrong_order",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P1"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_order",
+            "field": "process"
+          }
+        },
+        {
+          "id": "wrong_time",
+          "changes": [
+            {
+              "step": 2,
+              "field": "end",
+              "value": "5"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_time",
+            "field": "end"
+          }
+        },
+        {
+          "id": "cascading",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P1"
+            },
+            {
+              "step": 3,
+              "field": "end",
+              "value": "7"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_order",
+            "field": "process"
+          }
+        },
+        {
+          "id": "missing_segment",
+          "changes": [],
+          "drop_last": true,
+          "append": null,
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 4,
+            "error_code": "incomplete",
+            "field": "process"
+          }
+        },
+        {
+          "id": "extra_segment",
+          "changes": [],
+          "drop_last": false,
+          "append": {
+            "process": "P2",
+            "start": "7",
+            "end": "8"
+          },
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 5,
+            "error_code": "extra_segment",
+            "field": "process"
+          }
+        },
+        {
+          "id": "invalid_number",
+          "changes": [
+            {
+              "step": 2,
+              "field": "start",
+              "value": "-1"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "unknown_process",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P999"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval_rr_b",
+      "algorithm": "RR",
+      "kind": "cpu_scheduling",
+      "parameters": {
+        "processes": [
+          {
+            "name": "P10",
+            "arrival": 0,
+            "service": 3
+          },
+          {
+            "name": "P2",
+            "arrival": 0,
+            "service": 1
+          },
+          {
+            "name": "P1",
+            "arrival": 2,
+            "service": 2
+          }
+        ],
+        "quantum": 2
+      },
+      "focus": "同时到达按数值编号排序，P2 应先于 P10",
+      "reference_reasoning": "同到达时间按数字编号升序；忽略切换开销；空闲时跳到下一到达时刻。RR 每个时间片一行，片末到达者先入队，当前未完成进程后入队。",
+      "gold_rows": [
+        {
+          "process": "P2",
+          "start": "0",
+          "end": "1"
+        },
+        {
+          "process": "P10",
+          "start": "1",
+          "end": "3"
+        },
+        {
+          "process": "P1",
+          "start": "3",
+          "end": "5"
+        },
+        {
+          "process": "P10",
+          "start": "5",
+          "end": "6"
+        }
+      ],
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "equivalent",
+          "changes": [
+            {
+              "step": 1,
+              "field": "process",
+              "value": "p2"
+            },
+            {
+              "step": 2,
+              "field": "process",
+              "value": "p10"
+            },
+            {
+              "step": 3,
+              "field": "process",
+              "value": "p1"
+            },
+            {
+              "step": 4,
+              "field": "process",
+              "value": "p10"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "wrong_order",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P2"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_order",
+            "field": "process"
+          }
+        },
+        {
+          "id": "wrong_time",
+          "changes": [
+            {
+              "step": 2,
+              "field": "end",
+              "value": "4"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_time",
+            "field": "end"
+          }
+        },
+        {
+          "id": "cascading",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P2"
+            },
+            {
+              "step": 3,
+              "field": "end",
+              "value": "6"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_order",
+            "field": "process"
+          }
+        },
+        {
+          "id": "missing_segment",
+          "changes": [],
+          "drop_last": true,
+          "append": null,
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 4,
+            "error_code": "incomplete",
+            "field": "process"
+          }
+        },
+        {
+          "id": "extra_segment",
+          "changes": [],
+          "drop_last": false,
+          "append": {
+            "process": "P2",
+            "start": "6",
+            "end": "7"
+          },
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 5,
+            "error_code": "extra_segment",
+            "field": "process"
+          }
+        },
+        {
+          "id": "invalid_number",
+          "changes": [
+            {
+              "step": 2,
+              "field": "start",
+              "value": "-1"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "unknown_process",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P999"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval_rr_c",
+      "algorithm": "RR",
+      "kind": "cpu_scheduling",
+      "parameters": {
+        "processes": [
+          {
+            "name": "P1",
+            "arrival": 2,
+            "service": 1
+          },
+          {
+            "name": "P2",
+            "arrival": 7,
+            "service": 5
+          },
+          {
+            "name": "P3",
+            "arrival": 8,
+            "service": 2
+          }
+        ],
+        "quantum": 3
+      },
+      "focus": "初始空闲、中途空闲和不足一个时间片",
+      "reference_reasoning": "同到达时间按数字编号升序；忽略切换开销；空闲时跳到下一到达时刻。RR 每个时间片一行，片末到达者先入队，当前未完成进程后入队。",
+      "gold_rows": [
+        {
+          "process": "P1",
+          "start": "2",
+          "end": "3"
+        },
+        {
+          "process": "P2",
+          "start": "7",
+          "end": "10"
+        },
+        {
+          "process": "P3",
+          "start": "10",
+          "end": "12"
+        },
+        {
+          "process": "P2",
+          "start": "12",
+          "end": "14"
+        }
+      ],
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "equivalent",
+          "changes": [
+            {
+              "step": 1,
+              "field": "process",
+              "value": "p1"
+            },
+            {
+              "step": 2,
+              "field": "process",
+              "value": "p2"
+            },
+            {
+              "step": 3,
+              "field": "process",
+              "value": "p3"
+            },
+            {
+              "step": 4,
+              "field": "process",
+              "value": "p2"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "wrong_order",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P1"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_order",
+            "field": "process"
+          }
+        },
+        {
+          "id": "wrong_time",
+          "changes": [
+            {
+              "step": 2,
+              "field": "end",
+              "value": "11"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_time",
+            "field": "end"
+          }
+        },
+        {
+          "id": "cascading",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P1"
+            },
+            {
+              "step": 3,
+              "field": "end",
+              "value": "13"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_order",
+            "field": "process"
+          }
+        },
+        {
+          "id": "missing_segment",
+          "changes": [],
+          "drop_last": true,
+          "append": null,
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 4,
+            "error_code": "incomplete",
+            "field": "process"
+          }
+        },
+        {
+          "id": "extra_segment",
+          "changes": [],
+          "drop_last": false,
+          "append": {
+            "process": "P1",
+            "start": "14",
+            "end": "15"
+          },
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 5,
+            "error_code": "extra_segment",
+            "field": "process"
+          }
+        },
+        {
+          "id": "invalid_number",
+          "changes": [
+            {
+              "step": 2,
+              "field": "start",
+              "value": "-1"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        },
+        {
+          "id": "unknown_process",
+          "changes": [
+            {
+              "step": 2,
+              "field": "process",
+              "value": "P999"
+            }
+          ],
+          "drop_last": false,
+          "append": null,
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          }
+        }
+      ]
+    }
+  ]
+}

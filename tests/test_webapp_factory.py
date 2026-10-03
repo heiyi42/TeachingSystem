@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib
+import tempfile
+from pathlib import Path
 import unittest
 import warnings
 from unittest.mock import Mock, patch
@@ -19,7 +21,9 @@ class WebappFactoryTests(unittest.TestCase):
 
     def test_create_app_does_not_bootstrap_by_default(self) -> None:
         with (
-            patch.object(self.webapp.SessionStore, "load_sessions_from_disk") as load_sessions,
+            patch.object(
+                self.webapp.SessionStore, "load_sessions_from_disk"
+            ) as load_sessions,
             patch.object(self.webapp, "run_async") as run_async,
         ):
             app = self.webapp.create_app()
@@ -42,8 +46,13 @@ class WebappFactoryTests(unittest.TestCase):
                 "prewarm_subject_rags",
                 new=Mock(return_value="prewarm-coro"),
             ) as prewarm_subject_rags,
-            patch.object(self.webapp, "run_async", return_value=["C_program"]) as run_async,
+            patch.object(
+                self.webapp, "run_async", return_value=["C_program"]
+            ) as run_async,
             patch.object(self.webapp.atexit, "register"),
+            patch.object(
+                app.extensions["agenticrag.workflow_runs"], "start_cleanup"
+            ) as start_cleanup,
         ):
             self.webapp.bootstrap_app(app, prewarm=True, load_sessions=True)
             self.webapp.bootstrap_app(app, prewarm=True, load_sessions=True)
@@ -52,37 +61,22 @@ class WebappFactoryTests(unittest.TestCase):
         self.assertEqual(load_sessions.call_count, 1)
         self.assertEqual(prewarm_subject_rags.call_count, 1)
         self.assertEqual(run_async.call_count, 1)
+        start_cleanup.assert_called_once()
         self.assertTrue(state["sessions_loaded"])
         self.assertTrue(state["prewarm_attempted"])
         self.assertTrue(state["prewarm_succeeded"])
 
-    def test_legacy_route_renders_old_template(self) -> None:
+    def test_only_react_frontend_is_served(self) -> None:
         app = self.webapp.create_app()
-
-        response = app.test_client().get("/legacy")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("LightRAG Chat", response.get_data(as_text=True))
-
-    def test_graph_health_route_uses_graph_service(self) -> None:
-        app = self.webapp.create_app()
-        graph_service = self.webapp.get_graph_service(app)
-
-        with patch.object(
-            graph_service,
-            "health",
-            return_value={
-                "ok": True,
-                "configured": True,
-                "subjects": [],
-                "counts": {"Entity": 1},
-                "error": "",
-            },
+        client = app.test_client()
+        self.assertEqual(client.get("/legacy").status_code, 404)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(self.webapp, "_FRONTEND_DIST", Path(directory)),
         ):
-            response = app.test_client().get("/api/graph/health")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["counts"]["Entity"], 1)
+            response = client.get("/")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("前端页面尚未构建", response.json["error"])
 
 
 if __name__ == "__main__":

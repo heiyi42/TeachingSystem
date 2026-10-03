@@ -6,6 +6,7 @@ export function AnswerMessage({ message }: { message: ChatMessage }) {
   return (
     <article className="message assistant answer-message">
       <ExplainabilityCollapse message={message} />
+      {message.details?.explainability?.status === "cancelled" ? <p className="composer-notice" role="status">已停止生成</p> : null}
       <div className="answer-content">
         <MarkdownMessage content={message.content} />
       </div>

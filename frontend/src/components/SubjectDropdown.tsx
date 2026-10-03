@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import type { SubjectId } from "../types";
 
 const SUBJECT_OPTIONS: Array<{ id: SubjectId; label: string; description: string }> = [
-  { id: "auto", label: "自动学科", description: "自动判断问题属于哪门课" },
   { id: "C_program", label: "C语言", description: "语法、指针、函数、结构体、程序题" },
   { id: "operating_systems", label: "操作系统", description: "进程、线程、内存、文件系统、中断" },
   { id: "cybersec_lab", label: "网络安全", description: "漏洞、攻击实验、协议安全、SEED Lab" }

@@ -15,21 +15,17 @@ import type {
 
 export const WORKFLOW_NODES: AgentExecutionStep[] = [
   { nodeId: "query_understanding", nodeName: "问题理解", status: "pending" },
-  { nodeId: "retrieval_gate", nodeName: "检索判断", status: "pending" },
-  { nodeId: "subject_route", nodeName: "学科路由", status: "pending" },
-  { nodeId: "lightrag_retrieve", nodeName: "LightRAG 检索", status: "pending" },
   { nodeId: "deepsearch_plan", nodeName: "DeepSearch 规划", status: "pending" },
-  { nodeId: "deepsearch_subject_route", nodeName: "子问题学科路由", status: "pending" },
   { nodeId: "deepsearch_retrieve", nodeName: "多路 LightRAG 检索", status: "pending" },
   { nodeId: "deepsearch_review", nodeName: "证据评审", status: "pending" },
   { nodeId: "deepsearch_retry", nodeName: "改写/补充检索", status: "pending" },
   { nodeId: "neo4j_subgraph", nodeName: "Neo4j 子图", status: "pending" },
   { nodeId: "answer_generate", nodeName: "答案生成", status: "pending" },
-  { nodeId: "final_response", nodeName: "最终输出", status: "pending" }
+  { nodeId: "final_response", nodeName: "LLM输出", status: "pending" }
 ];
 
 const SUBJECT_LABELS: Record<string, string> = {
-  auto: "自动学科",
+  auto: "未记录课程",
   C_program: "C语言",
   operating_systems: "操作系统",
   cybersec_lab: "网络安全"
@@ -62,15 +58,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
   chats: [],
   activeChatId: null,
   activeMessages: [],
-  preferredMode: "auto",
-  preferredSubject: "auto",
+  preferredMode: "instant",
+  preferredSubject: "C_program",
   sending: false,
   setChats: (chats) => set({ chats }),
   setActiveChat: (chat) =>
     set({
       activeChatId: chat?.chat_id || null,
       activeMessages: chat?.messages || [],
-      preferredMode: chat?.mode || "auto"
+      preferredMode: chat?.mode === "deepsearch" ? "deepsearch" : "instant"
     }),
   setPreferredMode: (preferredMode) => set({ preferredMode }),
   setPreferredSubject: (preferredSubject) => set({ preferredSubject }),
@@ -106,9 +102,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
             : null;
         const currentExplainability = getExplainability(message);
         const nextExplainability = {
-          ...(currentExplainability || createExplainability("auto", "auto", "done")),
+          ...(currentExplainability || createExplainability(state.preferredMode, state.preferredSubject, "done")),
           ...(incomingExplainability || {}),
-          status: "done" as const
+          status: incomingExplainability?.status === "error" || incomingExplainability?.status === "cancelled" ? incomingExplainability.status : "done" as const
         };
         return {
           ...message,
@@ -162,9 +158,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
           details: {
             ...(message.details || {}),
             ...(requestKind ? { kind: requestKind } : {}),
+            ...(typeof meta.workflow_run_id === "string" ? { workflow_run_id: meta.workflow_run_id } : {}),
             explainability: {
               ...explainability,
-              mode: String(meta.requested_mode || explainability.mode || "auto"),
+              mode: String(meta.requested_mode || explainability.mode || "instant"),
               modeUsed:
                 typeof meta.mode_used === "string"
                   ? meta.mode_used
@@ -174,6 +171,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
                 typeof meta.retrieval_used === "boolean"
                   ? meta.retrieval_used
                   : explainability.retrievalUsed,
+              retrievalGateResult:
+                typeof meta.retrieval_gate_result === "string"
+                  ? meta.retrieval_gate_result
+                  : explainability.retrievalGateResult,
               retrievalGateReason:
                 typeof meta.retrieval_gate_reason === "string"
                   ? meta.retrieval_gate_reason
@@ -249,7 +250,7 @@ function getExplainability(message: ChatMessage): ExplainabilityDetails | null {
 
 function normalizeExplainability(raw: Record<string, unknown>): ExplainabilityDetails {
   return {
-    mode: typeof raw.mode === "string" ? raw.mode : "auto",
+    mode: typeof raw.mode === "string" ? raw.mode : "instant",
     modeUsed: typeof raw.modeUsed === "string" ? raw.modeUsed : undefined,
     subject: typeof raw.subject === "string" ? raw.subject : "auto",
     detectedSubject: typeof raw.detectedSubject === "string" ? raw.detectedSubject : undefined,
@@ -265,11 +266,13 @@ function normalizeExplainability(raw: Record<string, unknown>): ExplainabilityDe
     chunks: Array.isArray(raw.chunks) ? (raw.chunks as RetrievedChunk[]) : [],
     graphError: typeof raw.graphError === "string" ? raw.graphError : "",
     status:
-      raw.status === "streaming" || raw.status === "done" || raw.status === "error"
+      raw.status === "streaming" || raw.status === "done" || raw.status === "error" || raw.status === "cancelled"
         ? raw.status
         : "done",
     createdAt: typeof raw.createdAt === "string" ? raw.createdAt : undefined,
     retrievalUsed: typeof raw.retrievalUsed === "boolean" ? raw.retrievalUsed : undefined,
+    retrievalGateResult:
+      typeof raw.retrievalGateResult === "string" ? raw.retrievalGateResult : undefined,
     retrievalGateConfidence:
       typeof raw.retrievalGateConfidence === "number" ||
       typeof raw.retrievalGateConfidence === "string"
@@ -282,6 +285,11 @@ function normalizeExplainability(raw: Record<string, unknown>): ExplainabilityDe
       : undefined,
     autoTimings: isRecord(raw.autoTimings)
       ? (raw.autoTimings as unknown as ExplainabilityDetails["autoTimings"])
+      : undefined,
+    citations: isRecord(raw.citations) && Array.isArray(raw.citations.sources)
+      ? (raw.citations as unknown as ExplainabilityDetails["citations"]) : undefined,
+    responseTiming: isRecord(raw.responseTiming)
+      ? (raw.responseTiming as unknown as ExplainabilityDetails["responseTiming"])
       : undefined,
     autoUpgraded: typeof raw.autoUpgraded === "boolean" ? raw.autoUpgraded : undefined,
     autoUpgradeReason:

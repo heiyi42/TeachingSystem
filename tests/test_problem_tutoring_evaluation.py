@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from utils.evaluate_problem_tutoring import (
+from scripts.evaluate_problem_tutoring import (
     evaluate_question_bank,
     format_report,
     grade_candidate_answer,
@@ -16,7 +16,7 @@ class ProblemTutoringEvaluationTests(unittest.TestCase):
     def test_evaluation_reports_core_metrics(self) -> None:
         report = evaluate_question_bank(detail_limit=3)
 
-        self.assertEqual(report["totals"]["total"], 300)
+        self.assertEqual(report["totals"]["total"], 107)
         self.assertGreaterEqual(report["metrics"]["subject_accuracy_pct"], 99.0)
         self.assertGreaterEqual(report["metrics"]["problem_type_accuracy_pct"], 95.0)
         self.assertEqual(report["metrics"]["recommendation_nonempty_pct"], 100.0)

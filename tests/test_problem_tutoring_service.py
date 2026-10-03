@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from agenticRAG.agentic_config import EMBEDDING_MODEL
 from webapp_core.problem_tutoring_service import (
     ProblemTemplate,
     ProblemTutoringService,
@@ -405,7 +406,7 @@ class ProblemTutoringEmbeddingTests(unittest.IsolatedAsyncioTestCase):
             index_path.write_text(
                 json.dumps(
                     {
-                        "model": "fake",
+                        "model": EMBEDDING_MODEL,
                         "items": [
                             {
                                 "id": "os_fifo",

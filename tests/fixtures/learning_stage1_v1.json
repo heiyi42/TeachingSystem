@@ -1,0 +1,1604 @@
+{
+  "schema_version": 1,
+  "name": "第一阶段五类训练独立构造评测 v1",
+  "provenance": "开发助手手工编写固定参考作答和边界推导，再设置错误变体；未调用待测求解器生成答案。尚未经过教师复核。",
+  "limitations": "10道独立参数题的构造作答只核验工程行为；权限限于题设角色并集模型，日志为明确标注的模拟样例，不能推断真实攻击或学习效果。",
+  "problems": [
+    {
+      "id": "eval_sjf_arrival",
+      "kind": "cpu_scheduling",
+      "algorithm": "SJF",
+      "parameters": {
+        "processes": [
+          {
+            "name": "P1",
+            "arrival": 1,
+            "service": 6
+          },
+          {
+            "name": "P2",
+            "arrival": 2,
+            "service": 2
+          },
+          {
+            "name": "P3",
+            "arrival": 3,
+            "service": 1
+          }
+        ],
+        "quantum": null
+      },
+      "gold_rows": [
+        {
+          "process": "P1",
+          "start": "1",
+          "end": "7"
+        },
+        {
+          "process": "P3",
+          "start": "7",
+          "end": "8"
+        },
+        {
+          "process": "P2",
+          "start": "8",
+          "end": "10"
+        }
+      ],
+      "reference_reasoning": "初始空闲到1；SJF先完整执行P1，SRTF在2抢占；3时剩余时间相等，按较早到达继续P2。",
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_order",
+          "changes": [
+            {
+              "step": 1,
+              "field": "process",
+              "value": "P2"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 1,
+            "error_code": "wrong_order",
+            "field": "process"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_time",
+          "changes": [
+            {
+              "step": 2,
+              "field": "end",
+              "value": "9"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_time",
+            "field": "end"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "missing_last",
+          "changes": [],
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 3,
+            "error_code": "incomplete",
+            "field": "process"
+          },
+          "drop_last": true,
+          "append": null
+        },
+        {
+          "id": "extra",
+          "changes": [],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 4,
+            "error_code": "extra_segment",
+            "field": "process"
+          },
+          "drop_last": false,
+          "append": {
+            "process": "P1",
+            "start": "20",
+            "end": "21"
+          }
+        },
+        {
+          "id": "invalid",
+          "changes": [
+            {
+              "step": 1,
+              "field": "start",
+              "value": "-1"
+            }
+          ],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        }
+      ]
+    },
+    {
+      "id": "eval_sjf_idle",
+      "kind": "cpu_scheduling",
+      "algorithm": "SJF",
+      "parameters": {
+        "processes": [
+          {
+            "name": "P1",
+            "arrival": 0,
+            "service": 2
+          },
+          {
+            "name": "P10",
+            "arrival": 5,
+            "service": 1
+          },
+          {
+            "name": "P2",
+            "arrival": 5,
+            "service": 1
+          }
+        ],
+        "quantum": null
+      },
+      "gold_rows": [
+        {
+          "process": "P1",
+          "start": "0",
+          "end": "2"
+        },
+        {
+          "process": "P2",
+          "start": "5",
+          "end": "6"
+        },
+        {
+          "process": "P10",
+          "start": "6",
+          "end": "7"
+        }
+      ],
+      "reference_reasoning": "2到5空闲；同到达同服务时间按编号2先于10。",
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_order",
+          "changes": [
+            {
+              "step": 1,
+              "field": "process",
+              "value": "P2"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 1,
+            "error_code": "wrong_order",
+            "field": "process"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_time",
+          "changes": [
+            {
+              "step": 2,
+              "field": "end",
+              "value": "7"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_time",
+            "field": "end"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "missing_last",
+          "changes": [],
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 3,
+            "error_code": "incomplete",
+            "field": "process"
+          },
+          "drop_last": true,
+          "append": null
+        },
+        {
+          "id": "extra",
+          "changes": [],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 4,
+            "error_code": "extra_segment",
+            "field": "process"
+          },
+          "drop_last": false,
+          "append": {
+            "process": "P1",
+            "start": "20",
+            "end": "21"
+          }
+        },
+        {
+          "id": "invalid",
+          "changes": [
+            {
+              "step": 1,
+              "field": "start",
+              "value": "-1"
+            }
+          ],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        }
+      ]
+    },
+    {
+      "id": "eval_srtf_arrival",
+      "kind": "cpu_scheduling",
+      "algorithm": "SRTF",
+      "parameters": {
+        "processes": [
+          {
+            "name": "P1",
+            "arrival": 1,
+            "service": 6
+          },
+          {
+            "name": "P2",
+            "arrival": 2,
+            "service": 2
+          },
+          {
+            "name": "P3",
+            "arrival": 3,
+            "service": 1
+          }
+        ],
+        "quantum": null
+      },
+      "gold_rows": [
+        {
+          "process": "P1",
+          "start": "1",
+          "end": "2"
+        },
+        {
+          "process": "P2",
+          "start": "2",
+          "end": "4"
+        },
+        {
+          "process": "P3",
+          "start": "4",
+          "end": "5"
+        },
+        {
+          "process": "P1",
+          "start": "5",
+          "end": "10"
+        }
+      ],
+      "reference_reasoning": "初始空闲到1；SJF先完整执行P1，SRTF在2抢占；3时剩余时间相等，按较早到达继续P2。",
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_order",
+          "changes": [
+            {
+              "step": 1,
+              "field": "process",
+              "value": "P2"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 1,
+            "error_code": "wrong_order",
+            "field": "process"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_time",
+          "changes": [
+            {
+              "step": 2,
+              "field": "end",
+              "value": "5"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_time",
+            "field": "end"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "missing_last",
+          "changes": [],
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 4,
+            "error_code": "incomplete",
+            "field": "process"
+          },
+          "drop_last": true,
+          "append": null
+        },
+        {
+          "id": "extra",
+          "changes": [],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 5,
+            "error_code": "extra_segment",
+            "field": "process"
+          },
+          "drop_last": false,
+          "append": {
+            "process": "P1",
+            "start": "20",
+            "end": "21"
+          }
+        },
+        {
+          "id": "invalid",
+          "changes": [
+            {
+              "step": 1,
+              "field": "start",
+              "value": "-1"
+            }
+          ],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        }
+      ]
+    },
+    {
+      "id": "eval_srtf_idle",
+      "kind": "cpu_scheduling",
+      "algorithm": "SRTF",
+      "parameters": {
+        "processes": [
+          {
+            "name": "P1",
+            "arrival": 0,
+            "service": 2
+          },
+          {
+            "name": "P10",
+            "arrival": 5,
+            "service": 1
+          },
+          {
+            "name": "P2",
+            "arrival": 5,
+            "service": 1
+          }
+        ],
+        "quantum": null
+      },
+      "gold_rows": [
+        {
+          "process": "P1",
+          "start": "0",
+          "end": "2"
+        },
+        {
+          "process": "P2",
+          "start": "5",
+          "end": "6"
+        },
+        {
+          "process": "P10",
+          "start": "6",
+          "end": "7"
+        }
+      ],
+      "reference_reasoning": "2到5空闲；同到达同服务时间按编号2先于10。",
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_order",
+          "changes": [
+            {
+              "step": 1,
+              "field": "process",
+              "value": "P2"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 1,
+            "error_code": "wrong_order",
+            "field": "process"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_time",
+          "changes": [
+            {
+              "step": 2,
+              "field": "end",
+              "value": "7"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 2,
+            "error_code": "wrong_time",
+            "field": "end"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "missing_last",
+          "changes": [],
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 3,
+            "error_code": "incomplete",
+            "field": "process"
+          },
+          "drop_last": true,
+          "append": null
+        },
+        {
+          "id": "extra",
+          "changes": [],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 4,
+            "error_code": "extra_segment",
+            "field": "process"
+          },
+          "drop_last": false,
+          "append": {
+            "process": "P1",
+            "start": "20",
+            "end": "21"
+          }
+        },
+        {
+          "id": "invalid",
+          "changes": [
+            {
+              "step": 1,
+              "field": "start",
+              "value": "-1"
+            }
+          ],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        }
+      ]
+    },
+    {
+      "id": "eval_dh_1",
+      "kind": "dh",
+      "algorithm": "DH 计算",
+      "parameters": {
+        "p": 7,
+        "g": 3,
+        "a": 2,
+        "b": 3,
+        "description": "独立小参数模运算评测",
+        "security_checks": [
+          {
+            "label": "甲的公开值 A",
+            "format": "integer"
+          },
+          {
+            "label": "乙的公开值 B",
+            "format": "integer"
+          },
+          {
+            "label": "甲的共享值 K甲",
+            "format": "integer"
+          },
+          {
+            "label": "乙的共享值 K乙",
+            "format": "integer"
+          }
+        ]
+      },
+      "gold_rows": [
+        {
+          "value": "2"
+        },
+        {
+          "value": "6"
+        },
+        {
+          "value": "1"
+        },
+        {
+          "value": "1"
+        }
+      ],
+      "reference_reasoning": "分别手算四次模幂；模7公开值2/6共享1；模13公开值8/3共享1。",
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_first",
+          "changes": [
+            {
+              "step": 1,
+              "field": "value",
+              "value": "0"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 1,
+            "error_code": "wrong_public",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_last",
+          "changes": [
+            {
+              "step": 4,
+              "field": "value",
+              "value": "0"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 4,
+            "error_code": "wrong_shared",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "incomplete",
+          "changes": [
+            {
+              "step": 2,
+              "field": "value",
+              "value": ""
+            }
+          ],
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 2,
+            "error_code": "incomplete",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "missing_last",
+          "changes": [],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": true,
+          "append": null
+        },
+        {
+          "id": "invalid",
+          "changes": [
+            {
+              "step": 1,
+              "field": "value",
+              "value": "-1"
+            }
+          ],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        }
+      ]
+    },
+    {
+      "id": "eval_dh_2",
+      "kind": "dh",
+      "algorithm": "DH 计算",
+      "parameters": {
+        "p": 13,
+        "g": 2,
+        "a": 3,
+        "b": 4,
+        "description": "独立小参数模运算评测",
+        "security_checks": [
+          {
+            "label": "甲的公开值 A",
+            "format": "integer"
+          },
+          {
+            "label": "乙的公开值 B",
+            "format": "integer"
+          },
+          {
+            "label": "甲的共享值 K甲",
+            "format": "integer"
+          },
+          {
+            "label": "乙的共享值 K乙",
+            "format": "integer"
+          }
+        ]
+      },
+      "gold_rows": [
+        {
+          "value": "8"
+        },
+        {
+          "value": "3"
+        },
+        {
+          "value": "1"
+        },
+        {
+          "value": "1"
+        }
+      ],
+      "reference_reasoning": "分别手算四次模幂；模7公开值2/6共享1；模13公开值8/3共享1。",
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_first",
+          "changes": [
+            {
+              "step": 1,
+              "field": "value",
+              "value": "0"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 1,
+            "error_code": "wrong_public",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_last",
+          "changes": [
+            {
+              "step": 4,
+              "field": "value",
+              "value": "0"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 4,
+            "error_code": "wrong_shared",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "incomplete",
+          "changes": [
+            {
+              "step": 2,
+              "field": "value",
+              "value": ""
+            }
+          ],
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 2,
+            "error_code": "incomplete",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "missing_last",
+          "changes": [],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": true,
+          "append": null
+        },
+        {
+          "id": "invalid",
+          "changes": [
+            {
+              "step": 1,
+              "field": "value",
+              "value": "-1"
+            }
+          ],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        }
+      ]
+    },
+    {
+      "id": "eval_access_1",
+      "kind": "access_control",
+      "algorithm": "权限矩阵",
+      "parameters": {
+        "users": [
+          {
+            "name": "甲",
+            "roles": [
+              "读者"
+            ]
+          },
+          {
+            "name": "乙",
+            "roles": [
+              "写者"
+            ]
+          }
+        ],
+        "grants": [
+          {
+            "role": "读者",
+            "resource": "资料",
+            "action": "读"
+          },
+          {
+            "role": "写者",
+            "resource": "资料",
+            "action": "写"
+          }
+        ],
+        "queries": [
+          {
+            "user": "甲",
+            "resource": "资料",
+            "action": "读"
+          },
+          {
+            "user": "甲",
+            "resource": "资料",
+            "action": "写"
+          },
+          {
+            "user": "乙",
+            "resource": "资料",
+            "action": "写"
+          }
+        ],
+        "security_checks": [
+          {
+            "label": "甲/资料/读",
+            "format": "choice",
+            "options": [
+              "允许",
+              "拒绝"
+            ]
+          },
+          {
+            "label": "甲/资料/写",
+            "format": "choice",
+            "options": [
+              "允许",
+              "拒绝"
+            ]
+          },
+          {
+            "label": "乙/资料/写",
+            "format": "choice",
+            "options": [
+              "允许",
+              "拒绝"
+            ]
+          }
+        ]
+      },
+      "gold_rows": [
+        {
+          "value": "允许"
+        },
+        {
+          "value": "拒绝"
+        },
+        {
+          "value": "允许"
+        }
+      ],
+      "reference_reasoning": "按用户角色与资源/操作三项匹配，逐项手工列出允许/拒绝；多角色并集不跨资源授权。",
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_first",
+          "changes": [
+            {
+              "step": 1,
+              "field": "value",
+              "value": "拒绝"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 1,
+            "error_code": "wrong_permission",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_last",
+          "changes": [
+            {
+              "step": 3,
+              "field": "value",
+              "value": "拒绝"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 3,
+            "error_code": "wrong_permission",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "incomplete",
+          "changes": [
+            {
+              "step": 2,
+              "field": "value",
+              "value": ""
+            }
+          ],
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 2,
+            "error_code": "incomplete",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "missing_last",
+          "changes": [],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": true,
+          "append": null
+        },
+        {
+          "id": "invalid",
+          "changes": [
+            {
+              "step": 1,
+              "field": "value",
+              "value": "allow"
+            }
+          ],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        }
+      ]
+    },
+    {
+      "id": "eval_access_2",
+      "kind": "access_control",
+      "algorithm": "权限矩阵",
+      "parameters": {
+        "users": [
+          {
+            "name": "甲",
+            "roles": [
+              "读者",
+              "写者"
+            ]
+          },
+          {
+            "name": "乙",
+            "roles": []
+          }
+        ],
+        "grants": [
+          {
+            "role": "读者",
+            "resource": "资料",
+            "action": "读"
+          },
+          {
+            "role": "写者",
+            "resource": "草稿",
+            "action": "写"
+          }
+        ],
+        "queries": [
+          {
+            "user": "甲",
+            "resource": "草稿",
+            "action": "写"
+          },
+          {
+            "user": "甲",
+            "resource": "资料",
+            "action": "写"
+          },
+          {
+            "user": "乙",
+            "resource": "资料",
+            "action": "读"
+          }
+        ],
+        "security_checks": [
+          {
+            "label": "甲/草稿/写",
+            "format": "choice",
+            "options": [
+              "允许",
+              "拒绝"
+            ]
+          },
+          {
+            "label": "甲/资料/写",
+            "format": "choice",
+            "options": [
+              "允许",
+              "拒绝"
+            ]
+          },
+          {
+            "label": "乙/资料/读",
+            "format": "choice",
+            "options": [
+              "允许",
+              "拒绝"
+            ]
+          }
+        ]
+      },
+      "gold_rows": [
+        {
+          "value": "允许"
+        },
+        {
+          "value": "拒绝"
+        },
+        {
+          "value": "拒绝"
+        }
+      ],
+      "reference_reasoning": "按用户角色与资源/操作三项匹配，逐项手工列出允许/拒绝；多角色并集不跨资源授权。",
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_first",
+          "changes": [
+            {
+              "step": 1,
+              "field": "value",
+              "value": "拒绝"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 1,
+            "error_code": "wrong_permission",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_last",
+          "changes": [
+            {
+              "step": 3,
+              "field": "value",
+              "value": "允许"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 3,
+            "error_code": "wrong_permission",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "incomplete",
+          "changes": [
+            {
+              "step": 2,
+              "field": "value",
+              "value": ""
+            }
+          ],
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 2,
+            "error_code": "incomplete",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "missing_last",
+          "changes": [],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": true,
+          "append": null
+        },
+        {
+          "id": "invalid",
+          "changes": [
+            {
+              "step": 1,
+              "field": "value",
+              "value": "allow"
+            }
+          ],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        }
+      ]
+    },
+    {
+      "id": "eval_logs_1",
+      "kind": "log_evidence",
+      "algorithm": "日志证据",
+      "parameters": {
+        "target_user": "甲",
+        "target_source": "A",
+        "window_start": "10:00:00",
+        "window_end": "10:05:00",
+        "logs": [
+          {
+            "id": "X1",
+            "time": "10:00:00",
+            "user": "甲",
+            "source": "A",
+            "outcome": "失败"
+          },
+          {
+            "id": "X2",
+            "time": "10:00:00",
+            "user": "甲",
+            "source": "A",
+            "outcome": "成功"
+          },
+          {
+            "id": "X3",
+            "time": "10:05:00",
+            "user": "甲",
+            "source": "A",
+            "outcome": "失败"
+          },
+          {
+            "id": "X4",
+            "time": "10:05:01",
+            "user": "甲",
+            "source": "A",
+            "outcome": "成功"
+          }
+        ],
+        "security_checks": [
+          {
+            "label": "匹配的失败记录编号",
+            "format": "evidence"
+          },
+          {
+            "label": "匹配的成功记录编号",
+            "format": "evidence"
+          },
+          {
+            "label": "日志直接支持的时序结论",
+            "format": "choice",
+            "options": [
+              "见失败后的成功",
+              "有成功但未见失败后的成功",
+              "仅见失败",
+              "无匹配记录"
+            ]
+          }
+        ]
+      },
+      "gold_rows": [
+        {
+          "value": "X1,X3"
+        },
+        {
+          "value": "X2"
+        },
+        {
+          "value": "有成功但未见失败后的成功"
+        }
+      ],
+      "reference_reasoning": "手工按用户/来源/闭时间窗口筛选；同一时间不算严格晚于，乱序行使用时间字段比较。",
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_first",
+          "changes": [
+            {
+              "step": 1,
+              "field": "value",
+              "value": "无"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 1,
+            "error_code": "wrong_evidence",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_last",
+          "changes": [
+            {
+              "step": 3,
+              "field": "value",
+              "value": "仅见失败"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 3,
+            "error_code": "wrong_conclusion",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "incomplete",
+          "changes": [
+            {
+              "step": 2,
+              "field": "value",
+              "value": ""
+            }
+          ],
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 2,
+            "error_code": "incomplete",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "missing_last",
+          "changes": [],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": true,
+          "append": null
+        },
+        {
+          "id": "invalid",
+          "changes": [
+            {
+              "step": 1,
+              "field": "value",
+              "value": "X99"
+            }
+          ],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "alternative_order",
+          "changes": [
+            {
+              "step": 1,
+              "field": "value",
+              "value": "x3，x1"
+            }
+          ],
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        }
+      ]
+    },
+    {
+      "id": "eval_logs_2",
+      "kind": "log_evidence",
+      "algorithm": "日志证据",
+      "parameters": {
+        "target_user": "甲",
+        "target_source": "A",
+        "window_start": "10:00:00",
+        "window_end": "10:05:00",
+        "logs": [
+          {
+            "id": "X1",
+            "time": "10:03:00",
+            "user": "甲",
+            "source": "A",
+            "outcome": "成功"
+          },
+          {
+            "id": "X2",
+            "time": "10:02:00",
+            "user": "甲",
+            "source": "A",
+            "outcome": "失败"
+          },
+          {
+            "id": "X3",
+            "time": "10:01:00",
+            "user": "甲",
+            "source": "A",
+            "outcome": "成功"
+          },
+          {
+            "id": "X4",
+            "time": "10:04:00",
+            "user": "甲",
+            "source": "B",
+            "outcome": "失败"
+          }
+        ],
+        "security_checks": [
+          {
+            "label": "匹配的失败记录编号",
+            "format": "evidence"
+          },
+          {
+            "label": "匹配的成功记录编号",
+            "format": "evidence"
+          },
+          {
+            "label": "日志直接支持的时序结论",
+            "format": "choice",
+            "options": [
+              "见失败后的成功",
+              "有成功但未见失败后的成功",
+              "仅见失败",
+              "无匹配记录"
+            ]
+          }
+        ]
+      },
+      "gold_rows": [
+        {
+          "value": "X2"
+        },
+        {
+          "value": "X1,X3"
+        },
+        {
+          "value": "见失败后的成功"
+        }
+      ],
+      "reference_reasoning": "手工按用户/来源/闭时间窗口筛选；同一时间不算严格晚于，乱序行使用时间字段比较。",
+      "variants": [
+        {
+          "id": "correct",
+          "changes": [],
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_first",
+          "changes": [
+            {
+              "step": 1,
+              "field": "value",
+              "value": "无"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 1,
+            "error_code": "wrong_evidence",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "wrong_last",
+          "changes": [
+            {
+              "step": 3,
+              "field": "value",
+              "value": "仅见失败"
+            }
+          ],
+          "expected": {
+            "category": "incorrect",
+            "first_error_step": 3,
+            "error_code": "wrong_conclusion",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "incomplete",
+          "changes": [
+            {
+              "step": 2,
+              "field": "value",
+              "value": ""
+            }
+          ],
+          "expected": {
+            "category": "incomplete",
+            "first_error_step": 2,
+            "error_code": "incomplete",
+            "field": "value"
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "missing_last",
+          "changes": [],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": true,
+          "append": null
+        },
+        {
+          "id": "invalid",
+          "changes": [
+            {
+              "step": 1,
+              "field": "value",
+              "value": "X99"
+            }
+          ],
+          "expected": {
+            "category": "invalid",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        },
+        {
+          "id": "alternative_order",
+          "changes": [
+            {
+              "step": 2,
+              "field": "value",
+              "value": "x3，x1"
+            }
+          ],
+          "expected": {
+            "category": "correct",
+            "first_error_step": null,
+            "error_code": null,
+            "field": null
+          },
+          "drop_last": false,
+          "append": null
+        }
+      ]
+    }
+  ]
+}

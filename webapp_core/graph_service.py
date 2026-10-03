@@ -10,8 +10,12 @@ from dotenv import load_dotenv
 
 try:  # Neo4j is an optional runtime dependency for the visualization surface.
     from neo4j import GraphDatabase
+    from neo4j.exceptions import ServiceUnavailable, SessionExpired, TransientError
 except Exception:  # pragma: no cover - exercised when optional dependency is absent.
     GraphDatabase = None  # type: ignore[assignment]
+    ServiceUnavailable = None  # type: ignore[assignment]
+    SessionExpired = None  # type: ignore[assignment]
+    TransientError = None  # type: ignore[assignment]
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -61,6 +65,33 @@ _STOPWORDS = {
     "语言",
     "问题",
 }
+
+_RETRYABLE_NEO4J_ERROR_NAMES = {
+    "ConnectionAcquisitionTimeoutError",
+    "ServiceUnavailable",
+    "SessionExpired",
+    "TransientError",
+}
+_RETRYABLE_NEO4J_ERRORS = tuple(
+    error_type
+    for error_type in (ServiceUnavailable, SessionExpired, TransientError)
+    if error_type is not None
+)
+
+
+def _is_retryable_neo4j_error(exc: Exception) -> bool:
+    if _RETRYABLE_NEO4J_ERRORS and isinstance(exc, _RETRYABLE_NEO4J_ERRORS):
+        return True
+    return type(exc).__name__ in _RETRYABLE_NEO4J_ERROR_NAMES
+
+
+def _format_graph_error(exc: Exception) -> str:
+    if _is_retryable_neo4j_error(exc):
+        return (
+            f"Neo4j 连接中断（{type(exc).__name__}），已自动重连重试但仍失败；"
+            "请稍后重试，或检查 Aura 实例/网络状态。DeepSearch 回答不受影响。"
+        )
+    return f"{type(exc).__name__}: {exc}"
 
 
 class Neo4jGraphService:
@@ -114,54 +145,24 @@ class Neo4jGraphService:
         return self._driver, None
 
     def _run_read(self, query: str, **params: Any) -> list[dict[str, Any]]:
-        driver, error = self._driver_or_error()
-        if error:
-            raise RuntimeError(error)
-        with driver.session(database=self.database) as session:
-            result = session.run(query, **params)
-            return [dict(record) for record in result]
-
-    def health(self) -> dict[str, Any]:
-        if not self.configured:
-            _, error = self._driver_or_error()
-            return {
-                "ok": False,
-                "configured": False,
-                "error": error or "Neo4j is not configured.",
-                "subjects": [],
-                "counts": {},
-            }
-        try:
-            rows = self._run_read(
-                """
-                MATCH (n)
-                WHERE n:Subject OR n:Entity OR n:Document OR n:Chunk
-                RETURN labels(n)[0] AS label, count(n) AS count
-                ORDER BY label
-                """
-            )
-            subjects = self._run_read(
-                """
-                MATCH (s:Subject)
-                RETURN s.id AS id, coalesce(s.name, s.id) AS name
-                ORDER BY id
-                """
-            )
-            return {
-                "ok": True,
-                "configured": True,
-                "error": "",
-                "subjects": subjects,
-                "counts": {str(row["label"]): int(row["count"]) for row in rows},
-            }
-        except Exception as exc:
-            return {
-                "ok": False,
-                "configured": True,
-                "error": f"{type(exc).__name__}: {exc}",
-                "subjects": [],
-                "counts": {},
-            }
+        last_retryable_error: Exception | None = None
+        for attempt in range(2):
+            driver, error = self._driver_or_error()
+            if error:
+                raise RuntimeError(error)
+            try:
+                with driver.session(database=self.database) as session:
+                    result = session.run(query, **params)
+                    return [dict(record) for record in result]
+            except Exception as exc:
+                if attempt == 0 and _is_retryable_neo4j_error(exc):
+                    last_retryable_error = exc
+                    self.close()
+                    continue
+                raise
+        if last_retryable_error is not None:  # pragma: no cover - defensive.
+            raise last_retryable_error
+        return []  # pragma: no cover - loop always returns or raises.
 
     def search_entities(
         self,
@@ -208,7 +209,7 @@ class Neo4jGraphService:
             )
             return {"ok": True, "entities": [self._normalize_entity(row) for row in rows]}
         except Exception as exc:
-            return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "entities": []}
+            return {"ok": False, "error": _format_graph_error(exc), "entities": []}
 
     def _search_entities_from_chunks(
         self,
@@ -250,31 +251,7 @@ class Neo4jGraphService:
             )
             return {"ok": True, "entities": [self._normalize_entity(row) for row in rows]}
         except Exception as exc:
-            return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "entities": []}
-
-    def entity_chunks(self, *, entity_id: str, limit: int = 6) -> dict[str, Any]:
-        safe_limit = max(1, min(20, int(limit or 6)))
-        try:
-            rows = self._run_read(
-                """
-                MATCH (e:Entity {id: $entity_id})-[r:MENTIONED_IN]->(c:Chunk)
-                RETURN c.id AS id,
-                       coalesce(c.chunk_id, c.id) AS chunkId,
-                       c.subject AS subjectId,
-                       coalesce(c.content_preview, left(coalesce(c.content, ""), 240)) AS preview,
-                       coalesce(c.content, "") AS content,
-                       c.tokens AS tokens,
-                       c.file_path AS filePath,
-                       r.chunk_raw_id AS rawChunkId
-                ORDER BY chunkId
-                LIMIT $limit
-                """,
-                entity_id=str(entity_id or "").strip(),
-                limit=safe_limit,
-            )
-            return {"ok": True, "chunks": [self._normalize_chunk(row) for row in rows]}
-        except Exception as exc:
-            return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "chunks": []}
+            return {"ok": False, "error": _format_graph_error(exc), "entities": []}
 
     def local_subgraph(
         self,
@@ -382,7 +359,7 @@ class Neo4jGraphService:
         except Exception as exc:
             return {
                 "ok": False,
-                "error": f"{type(exc).__name__}: {exc}",
+                "error": _format_graph_error(exc),
                 "nodes": [],
                 "edges": [],
                 "chunks": [],

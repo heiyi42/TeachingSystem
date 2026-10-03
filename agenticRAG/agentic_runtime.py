@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 import os
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -6,19 +7,30 @@ from typing import List
 
 from langchain_openai import ChatOpenAI
 from lightrag import LightRAG
-from lightrag.llm.openai import gpt_4o_mini_complete, openai_embed
+from lightrag.llm.openai import openai_complete_if_cache, openai_embed
 from lightrag.utils import TiktokenTokenizer, Tokenizer, wrap_embedding_func_with_attrs
 
-from agenticRAG.agentic_config import DEBUG, WORKING_DIR
+from agenticRAG.agentic_config import (
+    DEBUG,
+    EMBEDDING_API_KEY,
+    EMBEDDING_BASE_URL,
+    EMBEDDING_BATCH_SIZE,
+    EMBEDDING_DIMENSION,
+    EMBEDDING_MODEL,
+    OPENAI_MODEL,
+    WORKING_DIR,
+)
 from agenticRAG.agentic_schema import (
     EvidenceCheck,
     QuestionComplexity,
+    SubQuestionRewrite,
     SubQuestionQueryPlan,
 )
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+llm = ChatOpenAI(model=OPENAI_MODEL, temperature=0)
 llm_subquestion_plan_struct = llm.with_structured_output(SubQuestionQueryPlan)
 llm_evidence_struct = llm.with_structured_output(EvidenceCheck)
+llm_subquestion_rewrite_struct = llm.with_structured_output(SubQuestionRewrite)
 llm_complexity_struct = llm.with_structured_output(QuestionComplexity)
 
 rag_by_working_dir: dict[str, LightRAG] = {}
@@ -28,8 +40,8 @@ current_working_dir: ContextVar[str] = ContextVar(
     "current_rag_working_dir",
     default=os.path.abspath(WORKING_DIR),
 )
-EMBED_MODEL = os.getenv("LIGHTRAG_EMBED_MODEL", "text-embedding-3-large")
-EMBED_DIM = int(os.getenv("LIGHTRAG_EMBED_DIM", "3072"))
+EMBED_MODEL = EMBEDDING_MODEL
+EMBED_DIM = EMBEDDING_DIMENSION
 EMBED_MAX_TOKEN_SIZE = int(os.getenv("LIGHTRAG_EMBED_MAX_TOKEN_SIZE", "8192"))
 
 
@@ -52,6 +64,7 @@ def _check_tiktoken_ready() -> bool:
     if tiktoken_ready is not None:
         return tiktoken_ready
     try:
+        # 本地计数编码独立于 API 模型，兼容网关模型名可能不在 tiktoken 注册表中。
         tok = TiktokenTokenizer("gpt-4o-mini")
         # Warm up once to ensure encoding file is actually available locally.
         tok.encode("tokenizer_warmup")
@@ -75,9 +88,10 @@ def _build_tokenizer() -> Tokenizer:
     model_name=EMBED_MODEL,
 )
 async def configured_openai_embed(texts, **kwargs):
-    kwargs.setdefault("model", EMBED_MODEL)
-    kwargs.setdefault("api_key", os.getenv("OPENAI_API_KEY"))
-    kwargs.setdefault("base_url", os.getenv("OPENAI_BASE_URL"))
+    kwargs["model"] = EMBED_MODEL
+    kwargs["api_key"] = EMBEDDING_API_KEY
+    kwargs["base_url"] = EMBEDDING_BASE_URL
+    kwargs["embedding_dim"] = EMBED_DIM
     kwargs.setdefault("max_token_size", EMBED_MAX_TOKEN_SIZE)
     return await openai_embed.func(texts, **kwargs)
 
@@ -89,9 +103,10 @@ async def configured_openai_embed(texts, **kwargs):
 )
 async def openai_embed_no_tiktoken(texts, **kwargs):
     """Disable tiktoken-based truncation to avoid runtime encoding download failures."""
-    kwargs.setdefault("model", EMBED_MODEL)
-    kwargs.setdefault("api_key", os.getenv("OPENAI_API_KEY"))
-    kwargs.setdefault("base_url", os.getenv("OPENAI_BASE_URL"))
+    kwargs["model"] = EMBED_MODEL
+    kwargs["api_key"] = EMBEDDING_API_KEY
+    kwargs["base_url"] = EMBEDDING_BASE_URL
+    kwargs["embedding_dim"] = EMBED_DIM
     kwargs["max_token_size"] = 0
     return await openai_embed.func(texts, **kwargs)
 
@@ -126,11 +141,31 @@ def use_rag_working_dir(working_dir: str | None):
         current_working_dir.reset(token)
 
 
+async def configured_openai_complete(
+    prompt, system_prompt=None, history_messages=None, **kwargs
+):
+    kwargs.pop("model", None)
+    kwargs.setdefault("api_key", os.getenv("OPENAI_API_KEY"))
+    kwargs.setdefault("base_url", os.getenv("OPENAI_BASE_URL"))
+    return await openai_complete_if_cache(
+        OPENAI_MODEL,
+        prompt,
+        system_prompt=system_prompt,
+        history_messages=history_messages if history_messages is not None else [],
+        **kwargs,
+    )
+
+
 async def _ainit_rag(working_dir: str) -> LightRAG:
+    directory = Path(working_dir).resolve()
+    # LightRAG keys shared storage by workspace, not directory; keep existing files while isolating courses.
     r = LightRAG(
-        working_dir=working_dir,
+        working_dir=str(directory.parent),
+        workspace=directory.name,
         embedding_func=_build_embedding_func(),
-        llm_model_func=gpt_4o_mini_complete,
+        embedding_batch_num=EMBEDDING_BATCH_SIZE,
+        llm_model_func=configured_openai_complete,
+        llm_model_name=OPENAI_MODEL,
         tokenizer=_build_tokenizer(),
     )
     await r.initialize_storages()

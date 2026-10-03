@@ -155,7 +155,9 @@ class CodeAnalysisService:
     @classmethod
     def _detect_compiler(cls, preferred_bin: str | None = None) -> CCompiler | None:
         candidates = [str(preferred_bin).strip()] if preferred_bin else []
-        candidates.extend(name for name in cls.COMPILER_CANDIDATES if name not in candidates)
+        candidates.extend(
+            name for name in cls.COMPILER_CANDIDATES if name not in candidates
+        )
         for candidate in candidates:
             resolved = cls._resolve_executable(candidate)
             if not resolved:
@@ -377,7 +379,9 @@ class CodeAnalysisService:
                 self._compile_args(compiler, source_path, Path(tmp_dir)),
                 timeout_s=compile_timeout,
             )
-            static_args = self._static_analysis_args(compiler, source_path, Path(tmp_dir))
+            static_args = self._static_analysis_args(
+                compiler, source_path, Path(tmp_dir)
+            )
             static_task = (
                 self._run_tool(static_args, timeout_s=static_timeout)
                 if static_args
@@ -405,7 +409,9 @@ class CodeAnalysisService:
                 for item in compile_diagnostics
                 if item["severity"] in {"error", "fatal error"}
             ]
-            warnings = [item for item in compile_diagnostics if item["severity"] == "warning"]
+            warnings = [
+                item for item in compile_diagnostics if item["severity"] == "warning"
+            ]
             risk_findings = [
                 item for item in analyzer_diagnostics if item["severity"] == "warning"
             ]
@@ -425,12 +431,16 @@ class CodeAnalysisService:
                     or "当前编译器不支持 AST 结构提取",
                     max_len=240,
                 )
-            if compiler.supports_ast and ast_run["exit_code"] != 0 and not structure.get(
-                "functions"
+            if (
+                compiler.supports_ast
+                and ast_run["exit_code"] != 0
+                and not structure.get("functions")
             ):
                 structure = self._extract_structure_fallback(safe_code)
                 structure["ast_available"] = False
-                structure["ast_error"] = self._short_text(ast_run["stderr"], max_len=240)
+                structure["ast_error"] = self._short_text(
+                    ast_run["stderr"], max_len=240
+                )
 
             compile_ok = bool(
                 compile_run["exit_code"] == 0
@@ -487,7 +497,9 @@ class CodeAnalysisService:
         }
 
     @staticmethod
-    def _compile_args(compiler: CCompiler, source_path: Path, tmp_dir: Path) -> list[str]:
+    def _compile_args(
+        compiler: CCompiler, source_path: Path, tmp_dir: Path
+    ) -> list[str]:
         if compiler.kind in {"clang", "gcc"}:
             return [
                 compiler.executable,
@@ -509,7 +521,9 @@ class CodeAnalysisService:
         raise ValueError(f"不支持的 C 编译器: {compiler.kind}")
 
     @staticmethod
-    def _build_binary_args(compiler: CCompiler, source_path: Path, binary_path: Path) -> list[str]:
+    def _build_binary_args(
+        compiler: CCompiler, source_path: Path, binary_path: Path
+    ) -> list[str]:
         if compiler.kind in {"clang", "gcc"}:
             return [
                 compiler.executable,
@@ -597,20 +611,30 @@ class CodeAnalysisService:
         public = {
             "exit_code": int(tool_run.get("exit_code", 0)),
             "timed_out": bool(tool_run.get("timed_out", False)),
-            "stderr": CodeAnalysisService._short_text(tool_run.get("stderr", ""), max_len=240),
+            "stderr": CodeAnalysisService._short_text(
+                tool_run.get("stderr", ""), max_len=240
+            ),
         }
         if tool_run.get("skipped"):
             public["skipped"] = True
-        stdout = CodeAnalysisService._short_text(tool_run.get("stdout", ""), max_len=240)
+        stdout = CodeAnalysisService._short_text(
+            tool_run.get("stdout", ""), max_len=240
+        )
         if stdout:
             public["stdout"] = stdout
         return public
 
     @classmethod
-    def _assess_execution_eligibility(cls, code: str, *, max_code_chars: int) -> dict[str, Any]:
+    def _assess_execution_eligibility(
+        cls, code: str, *, max_code_chars: int
+    ) -> dict[str, Any]:
         text = str(code or "")
         if not text.strip():
-            return {"eligible": False, "reason": "代码为空，无法执行。", "blocked_markers": []}
+            return {
+                "eligible": False,
+                "reason": "代码为空，无法执行。",
+                "blocked_markers": [],
+            }
         if len(text) > max_code_chars:
             return {
                 "eligible": False,
@@ -618,7 +642,11 @@ class CodeAnalysisService:
                 "blocked_markers": [],
             }
         if re.search(r"\bmain\s*\(", text) is None:
-            return {"eligible": False, "reason": "代码缺少 main 函数，已跳过运行。", "blocked_markers": []}
+            return {
+                "eligible": False,
+                "reason": "代码缺少 main 函数，已跳过运行。",
+                "blocked_markers": [],
+            }
 
         blocked_markers: list[str] = []
         for label, pattern in cls.EXECUTION_BLOCKLIST:
@@ -630,7 +658,11 @@ class CodeAnalysisService:
                 "reason": f"{blocked_markers[0]}，为避免越权副作用已跳过执行。",
                 "blocked_markers": blocked_markers,
             }
-        return {"eligible": True, "reason": "代码满足受限执行条件。", "blocked_markers": []}
+        return {
+            "eligible": True,
+            "reason": "代码满足受限执行条件。",
+            "blocked_markers": [],
+        }
 
     @staticmethod
     def _execution_env(tmp_dir: Path) -> dict[str, str]:
@@ -683,7 +715,9 @@ class CodeAnalysisService:
         return {
             "enabled": bool(execution.get("enabled", False)),
             "eligible": bool(execution.get("eligible", False)),
-            "reason": self._short_text(str(execution.get("reason", "") or ""), max_len=160),
+            "reason": self._short_text(
+                str(execution.get("reason", "") or ""), max_len=160
+            ),
             "blocked_markers": [
                 self._short_text(str(item), max_len=60)
                 for item in list(execution.get("blocked_markers", []) or [])[:4]
@@ -745,7 +779,9 @@ class CodeAnalysisService:
             cwd=str(tmp_dir),
         )
         build_ok = bool(
-            build_run["exit_code"] == 0 and not build_run["timed_out"] and binary_path.exists()
+            build_run["exit_code"] == 0
+            and not build_run["timed_out"]
+            and binary_path.exists()
         )
         if not build_ok:
             return self._execution_result(
@@ -809,8 +845,15 @@ class CodeAnalysisService:
             env=env,
         )
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout_s
+            )
             timed_out = False
+        except asyncio.CancelledError:
+            if proc.returncode is None:
+                proc.kill()
+            await proc.communicate()
+            raise
         except asyncio.TimeoutError:
             proc.kill()
             stdout, stderr = await proc.communicate()
@@ -963,7 +1006,9 @@ class CodeAnalysisService:
         for line in str(raw_output or "").splitlines():
             clean_line = line.strip()
             match = cls.DIAGNOSTIC_RE.match(clean_line)
-            msvc_match = cls.MSVC_DIAGNOSTIC_RE.match(clean_line) if match is None else None
+            msvc_match = (
+                cls.MSVC_DIAGNOSTIC_RE.match(clean_line) if match is None else None
+            )
             if match is None and msvc_match is None:
                 continue
             active_match = match or msvc_match
@@ -992,7 +1037,9 @@ class CodeAnalysisService:
                 continue
             seen.add(key)
             diagnostics.append(item)
-        diagnostics.sort(key=lambda item: (int(item["line"]), int(item["column"]), item["severity"]))
+        diagnostics.sort(
+            key=lambda item: (int(item["line"]), int(item["column"]), item["severity"])
+        )
         return diagnostics
 
     @classmethod
@@ -1034,11 +1081,21 @@ class CodeAnalysisService:
                     return value
             return None
 
-        def node_position(node: dict[str, Any], inherited_file: str) -> tuple[str, int | None, int | None]:
+        def node_position(
+            node: dict[str, Any], inherited_file: str
+        ) -> tuple[str, int | None, int | None]:
             loc = node.get("loc") if isinstance(node.get("loc"), dict) else {}
-            node_range = node.get("range") if isinstance(node.get("range"), dict) else {}
-            begin = node_range.get("begin") if isinstance(node_range.get("begin"), dict) else {}
-            node_file = str(loc.get("file") or begin.get("file") or inherited_file or "").strip()
+            node_range = (
+                node.get("range") if isinstance(node.get("range"), dict) else {}
+            )
+            begin = (
+                node_range.get("begin")
+                if isinstance(node_range.get("begin"), dict)
+                else {}
+            )
+            node_file = str(
+                loc.get("file") or begin.get("file") or inherited_file or ""
+            ).strip()
             line = loc.get("line") or begin.get("line")
             column = loc.get("col") or begin.get("col")
             if (
@@ -1050,7 +1107,11 @@ class CodeAnalysisService:
                 offset = first_int(loc.get("offset"), begin.get("offset"))
                 if offset is not None and 0 <= offset <= source_len:
                     node_file = target_file
-            return node_file, int(line) if line else None, int(column) if column else None
+            return (
+                node_file,
+                int(line) if line else None,
+                int(column) if column else None,
+            )
 
         def is_user_file(node_file: str) -> bool:
             text = str(node_file or "").strip()
@@ -1099,7 +1160,9 @@ class CodeAnalysisService:
                     stack.append(child)
             return ""
 
-        def walk(node: Any, inherited_file: str = "", current_function: str = "") -> None:
+        def walk(
+            node: Any, inherited_file: str = "", current_function: str = ""
+        ) -> None:
             if not isinstance(node, dict):
                 return
 
@@ -1108,7 +1171,11 @@ class CodeAnalysisService:
             user_owned = is_user_file(node_file or inherited_file)
             next_function = current_function
 
-            if kind == "FunctionDecl" and user_owned and not node.get("isImplicit", False):
+            if (
+                kind == "FunctionDecl"
+                and user_owned
+                and not node.get("isImplicit", False)
+            ):
                 name = str(node.get("name") or "").strip()
                 if name:
                     key = (name, line, column)
@@ -1127,10 +1194,18 @@ class CodeAnalysisService:
                         )
                     next_function = name
 
-            if kind in {"VarDecl", "ParmVarDecl"} and user_owned and not node.get("isImplicit", False):
+            if (
+                kind in {"VarDecl", "ParmVarDecl"}
+                and user_owned
+                and not node.get("isImplicit", False)
+            ):
                 name = str(node.get("name") or "").strip()
                 if name:
-                    scope = "parameter" if kind == "ParmVarDecl" else ("local" if current_function else "global")
+                    scope = (
+                        "parameter"
+                        if kind == "ParmVarDecl"
+                        else ("local" if current_function else "global")
+                    )
                     key = (kind, name, line, column, scope)
                     if key not in variable_seen:
                         variable_seen.add(key)
@@ -1269,7 +1344,9 @@ class CodeAnalysisService:
         for kind, pattern in loop_patterns:
             for match in pattern.finditer(masked):
                 line, column = cls._offset_to_line_column(source, match.start())
-                structure["loops"].append({"kind": kind, "line": line, "column": column})
+                structure["loops"].append(
+                    {"kind": kind, "line": line, "column": column}
+                )
 
         conditional_patterns = (
             ("IfStmt", re.compile(r"\bif\s*\(")),
@@ -1387,7 +1464,9 @@ class CodeAnalysisService:
             "#",
         )
 
-        for statement_start, statement_end in cls._iter_statement_ranges(masked, start, end):
+        for statement_start, statement_end in cls._iter_statement_ranges(
+            masked, start, end
+        ):
             statement_masked = masked[statement_start:statement_end]
             stripped = statement_masked.strip()
             if not stripped or stripped.startswith(statement_skip_prefixes):
@@ -1401,7 +1480,11 @@ class CodeAnalysisService:
             rest_source = str(match.group("rest") or "")
             rest_masked = statement_masked[match.start("rest") : match.end("rest")]
 
-            for declarator_source, declarator_masked, declarator_offset in cls._split_fallback_declarators(
+            for (
+                declarator_source,
+                declarator_masked,
+                declarator_offset,
+            ) in cls._split_fallback_declarators(
                 source=rest_source,
                 masked=rest_masked,
                 base_offset=rest_start,
@@ -1410,7 +1493,9 @@ class CodeAnalysisService:
                     source=declarator_source,
                     masked=declarator_masked,
                 )
-                name, relative_offset = cls._extract_fallback_declarator_name(left_masked)
+                name, relative_offset = cls._extract_fallback_declarator_name(
+                    left_masked
+                )
                 if not name or relative_offset is None:
                     continue
                 absolute_offset = declarator_offset + relative_offset
@@ -1431,7 +1516,9 @@ class CodeAnalysisService:
         return results
 
     @staticmethod
-    def _iter_statement_ranges(masked: str, start: int, end: int) -> list[tuple[int, int]]:
+    def _iter_statement_ranges(
+        masked: str, start: int, end: int
+    ) -> list[tuple[int, int]]:
         ranges: list[tuple[int, int]] = []
         stmt_start = start
         paren_depth = 0
@@ -1451,7 +1538,12 @@ class CodeAnalysisService:
                 brace_depth += 1
             elif ch == "}" and brace_depth > 0:
                 brace_depth -= 1
-            elif ch == ";" and paren_depth == 0 and bracket_depth == 0 and brace_depth == 0:
+            elif (
+                ch == ";"
+                and paren_depth == 0
+                and bracket_depth == 0
+                and brace_depth == 0
+            ):
                 ranges.append((stmt_start, idx + 1))
                 stmt_start = idx + 1
         return ranges
@@ -1481,8 +1573,15 @@ class CodeAnalysisService:
                 brace_depth += 1
             elif ch == "}" and brace_depth > 0:
                 brace_depth -= 1
-            elif ch == "," and paren_depth == 0 and bracket_depth == 0 and brace_depth == 0:
-                parts.append((source[start:idx], masked[start:idx], base_offset + start))
+            elif (
+                ch == ","
+                and paren_depth == 0
+                and bracket_depth == 0
+                and brace_depth == 0
+            ):
+                parts.append(
+                    (source[start:idx], masked[start:idx], base_offset + start)
+                )
                 start = idx + 1
         parts.append((source[start:], masked[start:], base_offset + start))
         return [(src, msk, offset) for src, msk, offset in parts if src.strip()]
@@ -1505,7 +1604,12 @@ class CodeAnalysisService:
                 brace_depth += 1
             elif ch == "}" and brace_depth > 0:
                 brace_depth -= 1
-            elif ch == "=" and paren_depth == 0 and bracket_depth == 0 and brace_depth == 0:
+            elif (
+                ch == "="
+                and paren_depth == 0
+                and bracket_depth == 0
+                and brace_depth == 0
+            ):
                 return source[:idx], masked[:idx]
         return source, masked
 
@@ -1521,7 +1625,9 @@ class CodeAnalysisService:
         return str(match.group(1) or "").strip(), match.start(1)
 
     @staticmethod
-    def _combine_declared_type_and_declarator(*, declared_type: str, declarator: str, name: str) -> str:
+    def _combine_declared_type_and_declarator(
+        *, declared_type: str, declarator: str, name: str
+    ) -> str:
         text = str(declarator or "")
         clean_name = str(name or "")
         if not clean_name:

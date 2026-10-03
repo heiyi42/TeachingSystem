@@ -25,11 +25,6 @@ def parse_args() -> argparse.Namespace:
         default=str(ProblemTutoringService.DEFAULT_QUESTION_BANK_EMBEDDING_INDEX_PATH),
         help="Path to the output embedding index JSON file.",
     )
-    parser.add_argument(
-        "--model",
-        default=None,
-        help="Optional embedding model override.",
-    )
     return parser.parse_args()
 
 
@@ -40,8 +35,6 @@ async def main() -> int:
         question_bank_embedding_index_path=args.output,
         question_bank_embed_enabled=True,
     )
-    if args.model:
-        service.question_bank_embed_model = str(args.model).strip() or service.question_bank_embed_model
     result = await service.build_question_bank_embedding_index()
     print(
         "Built question bank embedding index:",

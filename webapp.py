@@ -9,8 +9,8 @@ from flask import (
     Flask,
     Response,
     current_app,
+    g,
     jsonify,
-    render_template,
     request,
     send_from_directory,
 )
@@ -20,12 +20,18 @@ from agenticRAG.short_memory import shutdown_shared_conversation_memories
 from webapp_core import config as cfg
 from webapp_core.async_runner import async_runner, run_async, submit_async
 from webapp_core.chat_service import ChatService
+from webapp_core.workflow_runs import WorkflowRuns, WorkflowConflict
 from webapp_core.graph_service import Neo4jGraphService
+from webapp_core.learning_routes import learning_blueprint
+from webapp_core.learning_service import LearningService
+from webapp_core.learning_path import LearningPathService
+from webapp_core.learning_store import LearningStore
+from webapp_core.school_store import SchoolStore
+from webapp_core.school_routes import register_identity
 from webapp_core.session_store import SessionStore
 
 _STORE_EXT_KEY = "agenticrag.store"
 _CHAT_SERVICE_EXT_KEY = "agenticrag.chat_service"
-_GRAPH_SERVICE_EXT_KEY = "agenticrag.graph_service"
 _BOOTSTRAP_STATE_EXT_KEY = "agenticrag.bootstrap_state"
 _FRONTEND_DIST = Path(__file__).resolve().parent / "frontend" / "dist"
 
@@ -50,11 +56,6 @@ def get_store(app: Flask | None = None) -> SessionStore:
 def get_chat_service(app: Flask | None = None) -> ChatService:
     target = app or current_app
     return target.extensions[_CHAT_SERVICE_EXT_KEY]
-
-
-def get_graph_service(app: Flask | None = None) -> Neo4jGraphService:
-    target = app or current_app
-    return target.extensions[_GRAPH_SERVICE_EXT_KEY]
 
 
 def _get_bootstrap_state(app: Flask) -> dict[str, object]:
@@ -103,6 +104,9 @@ def bootstrap_app(
 
         if register_cleanup and not bool(state["cleanup_registered"]):
             _register_cleanup_hooks(store)
+            runs = app.extensions["agenticrag.workflow_runs"]
+            runs.start_cleanup()
+            atexit.register(runs.stop_cleanup)
             state["cleanup_registered"] = True
 
     return app
@@ -112,42 +116,34 @@ def home():
     index_path = _FRONTEND_DIST / "index.html"
     if index_path.exists():
         return send_from_directory(_FRONTEND_DIST, "index.html")
-    return render_template("chat.html")
-
-
-def legacy_home():
-    return render_template("chat.html")
+    return jsonify(error="前端页面尚未构建，请先完成前端构建"), 503
 
 
 def frontend_asset(filename: str):
     return send_from_directory(_FRONTEND_DIST / "assets", filename)
 
 
-def modes():
+def list_chats():
+    school = current_app.extensions["agenticrag.school_store"]
     return jsonify(
         {
-            "modes": [
-                {"id": "auto", "name": "Auto", "description": "自动选择回答策略"},
-                {"id": "instant", "name": "Instant", "description": "即刻回答"},
-                {
-                    "id": "deepsearch",
-                    "name": "DeepSearch",
-                    "description": "深度检索，回答更全面",
-                },
+            "chats": [
+                chat
+                for chat in get_store().list_sessions()
+                if school.can_read_chat(chat["chat_id"], g.current_user)
             ]
         }
     )
 
 
-def list_chats():
-    return jsonify({"chats": get_store().list_sessions()})
-
-
 def create_chat():
     payload = request.get_json(silent=True) or {}
     store = get_store()
-    mode = store.normalize_mode(payload.get("mode", "auto"))
+    mode = store.normalize_mode(payload.get("mode", "instant"))
     session = store.create_session(mode=mode)
+    current_app.extensions["agenticrag.school_store"].bind_chat(
+        session.chat_id, g.current_user["id"]
+    )
     with session.lock:
         data = session.to_public(include_messages=True)
     return jsonify(data)
@@ -157,20 +153,23 @@ def get_chat(chat_id: str):
     session = get_store().get_session(chat_id)
     if session is None:
         return jsonify({"error": "chat 不存在"}), 404
+    # Terminal state is written after messages; read it first so the snapshot includes them.
+    run = current_app.extensions["agenticrag.workflow_runs"].public(
+        g.current_user["id"], chat_id
+    )
     with session.lock:
         data = session.to_public(include_messages=True)
+    data["workflow_run"] = run
     return jsonify(data)
 
 
 def delete_chat(chat_id: str):
-    deleted = get_store().delete_session(chat_id)
-    if not deleted:
-        return jsonify({"error": "chat 不存在"}), 404
-    return jsonify({"ok": True, "deleted_chat_id": chat_id})
-
-
-def delete_chat_alias(chat_id: str):
-    deleted = get_store().delete_session(chat_id)
+    try:
+        deleted = current_app.extensions["agenticrag.workflow_runs"].delete_chat(
+            chat_id, get_store().delete_session
+        )
+    except WorkflowConflict as error:
+        return jsonify(error=str(error)), 409
     if not deleted:
         return jsonify({"error": "chat 不存在"}), 404
     return jsonify({"ok": True, "deleted_chat_id": chat_id})
@@ -180,7 +179,7 @@ def set_chat_mode(chat_id: str):
     store = get_store()
     session = store.get_or_create_session(chat_id)
     payload = request.get_json(silent=True) or {}
-    mode = store.normalize_mode(payload.get("mode", "auto"))
+    mode = store.normalize_mode(payload.get("mode", "instant"))
     with session.lock:
         session.mode = mode
         session.updated_at = time.time()
@@ -221,115 +220,203 @@ def rename_chat(chat_id: str):
     return jsonify(data)
 
 
-def clear_chat(chat_id: str):
-    data = get_store().clear_chat(chat_id)
-    return jsonify({"ok": True, "chat": data})
-
-
 def chat_message_stream(chat_id: str):
     payload = request.get_json(silent=True) or {}
-    event_stream_factory, error = get_chat_service().build_chat_message_stream_handler(
-        chat_id,
-        payload,
+    if not isinstance(payload, dict):
+        return jsonify(error="请求须为 JSON 对象"), 400
+    if not str(payload.get("message", "")).strip():
+        return jsonify(error="message 不能为空"), 400
+    if payload.get("resume_run_id"):
+        try:
+            run = current_app.extensions["agenticrag.workflow_runs"].claim(
+                g.current_user["id"], chat_id, {}, str(payload["resume_run_id"])
+            )
+        except LookupError as error:
+            return jsonify(error=str(error)), 404
+        except WorkflowConflict as error:
+            return jsonify(error=str(error)), 409
+        payload = dict(run.row["payload"])
+        if payload.get("learning_attempt_id"):
+            try:
+                LearningPathService(g.learning_service).question_context(
+                    payload["learning_attempt_id"]
+                )
+            except (LookupError, ValueError) as error:
+                run.save(status="failed", error=str(error))
+                run.close()
+                return jsonify(error=str(error)), 409
+        return _chat_stream_response(chat_id, payload, run)
+    if payload.get("restart_run_id"):
+        previous = current_app.extensions["agenticrag.workflow_runs"].latest(
+            g.current_user["id"], chat_id
+        )
+        if not previous or previous["id"] != str(payload["restart_run_id"]):
+            return jsonify(error="可重试任务不存在"), 404
+        payload = dict(previous["payload"])
+        # The stored question already contains its learning context.
+        if payload.get("learning_attempt_id"):
+            try:
+                LearningPathService(g.learning_service).question_context(
+                    payload["learning_attempt_id"]
+                )
+            except (LookupError, ValueError) as error:
+                return jsonify(error=str(error)), 409
+        try:
+            run = current_app.extensions["agenticrag.workflow_runs"].claim(
+                g.current_user["id"], chat_id, payload
+            )
+        except WorkflowConflict as error:
+            return jsonify(error=str(error)), 409
+        return _chat_stream_response(chat_id, payload, run)
+    if payload.get("learning_attempt_id") is not None:
+        if not isinstance(payload["learning_attempt_id"], str):
+            return jsonify(error="练习编号须为字符串"), 400
+        try:
+            context = LearningPathService(g.learning_service).question_context(
+                payload["learning_attempt_id"]
+            )
+        except LookupError as error:
+            return jsonify(error=str(error)), 404
+        except ValueError as error:
+            return jsonify(error=str(error)), 409
+        payload["subjects"] = [context["subject_id"]]
+        payload["message"] = (
+            str(payload.get("message", "")).strip() + "\n\n" + context["prompt"]
+        )
+    mode = get_store().normalize_mode(
+        payload.get("mode", get_store().get_session(chat_id).mode)
     )
+    runs = current_app.extensions["agenticrag.workflow_runs"]
+    try:
+        payload["mode"] = mode
+        run = runs.claim(g.current_user["id"], chat_id, payload)
+    except WorkflowConflict as error:
+        return jsonify(error=str(error)), 409
+    return _chat_stream_response(chat_id, payload, run)
+
+
+def _chat_stream_response(chat_id, payload, run):
+    try:
+        (
+            event_stream_factory,
+            error,
+        ) = get_chat_service().build_chat_message_stream_handler(
+            chat_id,
+            payload,
+            workflow_run=run,
+            can_read=_stream_permission(chat_id),
+        )
+    except BaseException:
+        if run:
+            run.close()
+        raise
     if error:
+        if run:
+            run.save(status="failed", error=error[0])
+            run.close()
         message, status = error
         return jsonify({"error": message}), status
 
-    return Response(
+    response = Response(
         event_stream_factory(),
         mimetype="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
     )
+    if run:
+        response.headers["X-Workflow-Run"] = run.id
+        response.headers["X-Workflow-Execution"] = run.row["execution_id"]
+        response.call_on_close(lambda: run.close() if not run.started else None)
+    return response
+
+
+def _stream_permission(chat_id):
+    school = current_app.extensions["agenticrag.school_store"]
+    user, token = g.current_user, request.cookies.get("gm_session")
+    return lambda: school.user_for_token(token) == user and school.can_read_chat(
+        chat_id, user
+    )
+
+
+def chat_run_events(chat_id, run_id):
+    runs = current_app.extensions["agenticrag.workflow_runs"]
+    execution_id = request.args.get("execution_id", "")
+    try:
+        after = int(request.args.get("after", "0"))
+        if after < 0:
+            raise ValueError()
+        runs.execution(g.current_user["id"], chat_id, run_id, execution_id)
+    except ValueError:
+        return jsonify(error="无效的事件序号"), 400
+    except LookupError as error:
+        return jsonify(error=str(error)), 404
+    return Response(
+        runs.iter_events(
+            g.current_user["id"],
+            chat_id,
+            run_id,
+            execution_id,
+            after,
+            _stream_permission(chat_id),
+        ),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def cancel_chat_run(chat_id, run_id):
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify(error="请求须为 JSON 对象"), 400
+    try:
+        result = current_app.extensions["agenticrag.workflow_runs"].cancel(
+            g.current_user["id"], chat_id, run_id, str(payload.get("execution_id", ""))
+        )
+    except LookupError as error:
+        return jsonify(error=str(error)), 404
+    return jsonify(result)
 
 
 def chat_updates_stream():
+    school = current_app.extensions["agenticrag.school_store"]
+    user = g.current_user
+    token = request.cookies.get("gm_session")
     return Response(
-        get_chat_service().iter_chat_update_events(),
+        get_chat_service().iter_chat_update_events(
+            can_read=lambda chat_id: school.user_for_token(token) == user
+            and school.can_read_chat(chat_id, user)
+        ),
         mimetype="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
     )
 
 
-def graph_health():
-    return jsonify(get_graph_service().health())
-
-
-def graph_search():
-    limit = request.args.get("limit", "8")
-    result = get_graph_service().search_entities(
-        subject_id=request.args.get("subject_id", ""),
-        query=request.args.get("q", ""),
-        limit=int(limit) if str(limit).isdigit() else 8,
-    )
-    status = 200 if result.get("ok", False) else 503
-    return jsonify(result), status
-
-
-def _payload_int(payload: dict[str, object], key: str, default: int) -> int:
-    try:
-        return int(payload.get(key, default) or default)
-    except (TypeError, ValueError):
-        return default
-
-
-def graph_local_subgraph():
-    payload = request.get_json(silent=True) or {}
-    result = get_graph_service().local_subgraph(
-        subject_ids=[
-            str(item)
-            for item in payload.get("subject_ids", payload.get("subjectIds", [])) or []
-        ],
-        query=str(payload.get("query", "") or ""),
-        center_entity_ids=[
-            str(item)
-            for item in payload.get(
-                "center_entity_ids",
-                payload.get("centerEntityIds", []),
-            )
-            or []
-        ],
-        depth=_payload_int(payload, "depth", 1),
-        limit=_payload_int(payload, "limit", 80),
-    )
-    status = 200 if result.get("ok", False) else 503
-    return jsonify(result), status
-
-
-def graph_entity_chunks(entity_id: str):
-    limit = request.args.get("limit", "6")
-    result = get_graph_service().entity_chunks(
-        entity_id=entity_id,
-        limit=int(limit) if str(limit).isdigit() else 6,
-    )
-    status = 200 if result.get("ok", False) else 503
-    return jsonify(result), status
-
-
 def _register_routes(app: Flask) -> None:
+    app.add_url_rule(
+        "/api/chats/<chat_id>/runs/<run_id>/events",
+        view_func=chat_run_events,
+        methods=["GET"],
+    )
+    app.add_url_rule(
+        "/api/chats/<chat_id>/runs/<run_id>/cancel",
+        view_func=cancel_chat_run,
+        methods=["POST"],
+    )
     app.add_url_rule("/", view_func=home, methods=["GET"])
-    app.add_url_rule("/legacy", view_func=legacy_home, methods=["GET"])
-    app.add_url_rule("/assets/<path:filename>", view_func=frontend_asset, methods=["GET"])
-    app.add_url_rule("/api/modes", view_func=modes, methods=["GET"])
+    app.add_url_rule(
+        "/assets/<path:filename>", view_func=frontend_asset, methods=["GET"]
+    )
     app.add_url_rule("/api/chats", view_func=list_chats, methods=["GET"])
     app.add_url_rule("/api/chats", view_func=create_chat, methods=["POST"])
     app.add_url_rule("/api/chats/<chat_id>", view_func=get_chat, methods=["GET"])
     app.add_url_rule(
-        "/api/chats/<chat_id>",
-        view_func=delete_chat,
-        methods=["DELETE", "POST"],
-    )
-    app.add_url_rule(
         "/api/chats/<chat_id>/delete",
-        view_func=delete_chat_alias,
+        view_func=delete_chat,
         methods=["POST"],
     )
     app.add_url_rule(
@@ -348,11 +435,6 @@ def _register_routes(app: Flask) -> None:
         methods=["POST"],
     )
     app.add_url_rule(
-        "/api/chats/<chat_id>/clear",
-        view_func=clear_chat,
-        methods=["POST"],
-    )
-    app.add_url_rule(
         "/api/chats/<chat_id>/messages/stream",
         view_func=chat_message_stream,
         methods=["POST"],
@@ -360,18 +442,6 @@ def _register_routes(app: Flask) -> None:
     app.add_url_rule(
         "/api/events/chat-updates",
         view_func=chat_updates_stream,
-        methods=["GET"],
-    )
-    app.add_url_rule("/api/graph/health", view_func=graph_health, methods=["GET"])
-    app.add_url_rule("/api/graph/search", view_func=graph_search, methods=["GET"])
-    app.add_url_rule(
-        "/api/graph/local-subgraph",
-        view_func=graph_local_subgraph,
-        methods=["POST"],
-    )
-    app.add_url_rule(
-        "/api/graph/entity/<path:entity_id>/chunks",
-        view_func=graph_entity_chunks,
         methods=["GET"],
     )
 
@@ -382,8 +452,9 @@ def create_app(
     prewarm: bool = False,
     load_sessions: bool = False,
     register_cleanup: bool = True,
+    learning_store_path: str | Path | None = None,
 ) -> Flask:
-    app = Flask(__name__, template_folder="templates")
+    app = Flask(__name__, template_folder=None)
     store = SessionStore(_build_memory_factory())
     chat_service = ChatService(store, run_async, submit_async)
     graph_service = Neo4jGraphService()
@@ -391,7 +462,6 @@ def create_app(
 
     app.extensions[_STORE_EXT_KEY] = store
     app.extensions[_CHAT_SERVICE_EXT_KEY] = chat_service
-    app.extensions[_GRAPH_SERVICE_EXT_KEY] = graph_service
     app.extensions[_BOOTSTRAP_STATE_EXT_KEY] = {
         "lock": Lock(),
         "cleanup_registered": False,
@@ -401,6 +471,28 @@ def create_app(
     }
 
     _register_routes(app)
+    learning_service = LearningService(
+        LearningStore(learning_store_path or cfg.WEB_LEARNING_STORE_PATH),
+        chat_service.problem_tutoring_service,
+    )
+    app.extensions["agenticrag.learning_service"] = learning_service
+    app.extensions["agenticrag.workflow_runs"] = WorkflowRuns(
+        learning_service.store.path.with_name(
+            f"{learning_service.store.path.stem}_workflows.sqlite3"
+        )
+    )
+    app.register_blueprint(learning_blueprint(learning_service))
+    app.register_blueprint(learning_blueprint(learning_service, demo=True))
+    school = SchoolStore(
+        learning_service.store.path.with_name(
+            f"{learning_service.store.path.stem}_school.sqlite3"
+        )
+    )
+    questions = chat_service.problem_tutoring_service.load_question_bank()
+    register_identity(app, school, learning_service, store, questions)
+    chat_service.problem_tutoring_service.question_bank_provider = (
+        lambda: school.catalog("qa").values()
+    )
 
     if bootstrap:
         bootstrap_app(

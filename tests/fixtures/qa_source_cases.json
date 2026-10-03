@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "notice": "固定请求与原文匹配回归，不进行模型打分。",
+  "cases": [
+    {
+      "id": "c_char",
+      "subjects": [
+        "C_program"
+      ],
+      "mode": "instant",
+      "question": "C 语言中 sizeof(char) 是多少？这是否说明所有机器的一个字节都是 8 位？两句话回答。",
+      "require_citations": false
+    },
+    {
+      "id": "c_undefined",
+      "subjects": [
+        "C_program"
+      ],
+      "mode": "instant",
+      "question": "C17 中 int i=1; printf(\"%d %d\", i++, i++); 的输出一定是什么？简短回答。",
+      "require_citations": false
+    },
+    {
+      "id": "c_array",
+      "subjects": [
+        "C_program"
+      ],
+      "mode": "auto",
+      "question": "根据课程资料解释数组名与指针变量的区别，说明 sizeof 和函数传参的例外，简短回答并引用原文。",
+      "require_citations": true
+    },
+    {
+      "id": "c_free",
+      "subjects": [
+        "C_program"
+      ],
+      "mode": "deepsearch",
+      "question": "依据课程资料，free(p) 后 p 自动变为 NULL 吗？再次访问或重复 free 的后果是什么？简短回答并引用原文。",
+      "require_citations": true
+    },
+    {
+      "id": "os_deadlock",
+      "subjects": [
+        "operating_systems"
+      ],
+      "mode": "auto",
+      "question": "请根据教材解释死锁的四个必要条件，并注明出处。简短回答。",
+      "require_citations": true
+    },
+    {
+      "id": "os_fifo",
+      "subjects": [
+        "operating_systems"
+      ],
+      "mode": "deepsearch",
+      "question": "根据教材确认：FIFO 增加页框数一定不会增加缺页次数，对吗？请简短解释并引用原文。",
+      "require_citations": true
+    },
+    {
+      "id": "os_semaphore",
+      "subjects": [
+        "operating_systems"
+      ],
+      "mode": "instant",
+      "question": "信号量初值为1，线程A执行P成功后、尚未V时，线程B执行P一定也能进入临界区吗？简短回答。",
+      "require_citations": false
+    },
+    {
+      "id": "sec_sign",
+      "subjects": [
+        "cybersec_lab"
+      ],
+      "mode": "auto",
+      "question": "请依据课程资料解释数字签名与加密的区别，给出引用来源。简短回答。",
+      "require_citations": true
+    },
+    {
+      "id": "sec_hash",
+      "subjects": [
+        "cybersec_lab"
+      ],
+      "mode": "deepsearch",
+      "question": "依据课程实验讲义，散列和加密有什么区别？哈希能用密钥解密回原文吗？简短回答并引用原文。",
+      "require_citations": true
+    },
+    {
+      "id": "sec_sql",
+      "subjects": [
+        "cybersec_lab"
+      ],
+      "mode": "instant",
+      "question": "把用户输入直接拼到SQL语句中，前端过滤引号就足以防SQL注入吗？只讲防护，简短回答。",
+      "require_citations": false
+    },
+    {
+      "id": "unknown_material",
+      "subjects": [
+        "C_program"
+      ],
+      "mode": "deepsearch",
+      "question": "只依据本课程资料回答：老师在2026年10月3日私下宣布的期末考试确切时间是什么？没有原文就明确说无法确认，不要猜测。",
+      "require_citations": false
+    },
+    {
+      "id": "cross_memory",
+      "subjects": [
+        "C_program",
+        "operating_systems"
+      ],
+      "mode": "deepsearch",
+      "question": "根据两门课资料，C程序的malloc申请的堆内存，与操作系统的虚拟内存、物理内存是什么关系？它会为每次malloc直接分配新的物理页吗？简短回答并引用原文。",
+      "require_citations": true
+    }
+  ]
+}

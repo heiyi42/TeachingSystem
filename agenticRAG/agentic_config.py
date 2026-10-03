@@ -1,8 +1,26 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "").strip()
+if not OPENAI_MODEL:
+    raise ValueError("请在 .env 或环境变量中设置 OPENAI_MODEL")
+
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "").strip()
+if not EMBEDDING_MODEL:
+    raise ValueError("请在 .env 或环境变量中设置 EMBEDDING_MODEL")
+
+EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "").strip()
+EMBEDDING_BASE_URL = os.getenv("EMBEDDING_BASE_URL", "").strip()
+if not EMBEDDING_API_KEY or not EMBEDDING_BASE_URL:
+    raise ValueError("请在 .env 或环境变量中设置 EMBEDDING_API_KEY 和 EMBEDDING_BASE_URL")
+EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", "1536"))
+EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
+if EMBEDDING_DIMENSION <= 0 or EMBEDDING_BATCH_SIZE <= 0:
+    raise ValueError("EMBEDDING_DIMENSION 和 EMBEDDING_BATCH_SIZE 必须为正整数")
 
 
 def _safe_env_int(name: str, default: int) -> int:
@@ -12,7 +30,7 @@ def _safe_env_int(name: str, default: int) -> int:
         return default
 
 
-WORKING_DIR = os.getenv("RAG_WORKING_DIR", "./dickens")
+WORKING_DIR = os.getenv("RAG_WORKING_DIR", "./storage/operating_systems")
 DEBUG = os.getenv("RAG_DEBUG", "1").lower() in {"1", "true", "yes", "on"}
 MAX_RETRY = _safe_env_int("RAG_MAX_RETRY", 1)
 DEFAULT_THREAD_ID = os.getenv("RAG_THREAD_ID", "rag-demo-1")

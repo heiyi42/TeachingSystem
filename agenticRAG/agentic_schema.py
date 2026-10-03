@@ -52,9 +52,15 @@ class QuestionComplexity(BaseModel):
 class EvidenceCheck(BaseModel):
     sufficient: bool = Field(description="当前检索结果是否足以回答该子问题")
     reason: str = Field(description="判断理由，简短即可")
+
+
+class SubQuestionRewrite(BaseModel):
     rewritten_question: str = Field(
+        description="针对证据不足的子问题，给出一个更具体、更容易检索到答案的改写问题",
+    )
+    reason: str = Field(
         default="",
-        description="若证据不足，给一个更容易检索的改写问题；若已充分则留空",
+        description="改写理由，简短说明改写如何补足检索缺口",
     )
 
 
@@ -76,3 +82,5 @@ class State(TypedDict, total=False):
     insufficient_subquestion_ids: List[str]
     query_total_ms: str
     final_answer: str
+    answer_style_instruction: str
+    retry_rewrites: List[Dict[str, Any]]

@@ -5,19 +5,65 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 import agenticRAG.agentic_answer as agentic_answer_module
+import agenticRAG.agentic_nodes as agentic_nodes_module
 import agenticRAG.instant_answer as instant_answer_module
 
 
 class AgenticAnswerTests(unittest.IsolatedAsyncioTestCase):
-    async def test_run_question_plan_state_requires_routed_deepsearch(self) -> None:
-        with self.assertRaisesRegex(ValueError, "routed DeepSearch"):
+    async def test_run_question_plan_state_requires_selected_course(self) -> None:
+        with self.assertRaisesRegex(ValueError, "selected course"):
             await agentic_answer_module.run_question_plan_state("测试问题")
+
+    def test_build_final_answer_prompt_uses_answer_style_instruction(self) -> None:
+        prompt = agentic_nodes_module.build_final_answer_prompt(
+            {
+                "question": "解释栈溢出为什么同时和 C、OS、安全有关",
+                "response_language": "zh",
+                "answer_style_instruction": (
+                    "请使用 Markdown，并优先按以下学习型结构回答：\n"
+                    "1) `## 结论`；\n"
+                    "2) `## 问题拆解与综合判断`；\n"
+                    "3) `## 核心概念与机制`。"
+                ),
+                "sub_questions": [
+                    {
+                        "id": "sq1",
+                        "question": "栈溢出在 C 中如何发生？",
+                        "used_question": "栈溢出 C",
+                        "target_subjects": ["C_program"],
+                        "sufficient": "True",
+                        "judge_reason": "证据充分",
+                    }
+                ],
+                "subquery_results": [
+                    {
+                        "sub_question_id": "sq1",
+                        "subject_id": "C_program",
+                        "answer": (
+                            "## 核心概念\n"
+                            "栈缓冲区越界写入会覆盖相邻栈帧数据。\n"
+                            "## 代码示例\n"
+                            "char buf[16]; strcpy(buf, input);"
+                        ),
+                        "query_status": "success",
+                    }
+                ],
+                "query_attempt": 0,
+            }
+        )
+
+        self.assertIn("## 问题拆解与综合判断", prompt)
+        self.assertIn("## 核心概念与机制", prompt)
+        self.assertIn("不要完整罗列每个子问题", prompt)
+        self.assertIn("不要沿用检索材料里的旧标题结构", prompt)
+        self.assertIn("请基于给定子问题及其检索原文", prompt)
 
     async def test_run_question_plan_state_retries_by_subquestion(self) -> None:
         query_rounds: list[int] = []
-        routed: dict[str, dict[str, object]] = {}
 
-        def fake_build_global_subquestion_plan(state: dict[str, object]) -> dict[str, object]:
+        def fake_build_global_subquestion_plan(
+            state: dict[str, object]
+        ) -> dict[str, object]:
             self.assertEqual(state["question"], "测试问题")
             self.assertEqual(state["requested_mode"], "deepsearch")
             return {
@@ -51,36 +97,9 @@ class AgenticAnswerTests(unittest.IsolatedAsyncioTestCase):
                 "query_total_ms": "0",
             }
 
-        def fake_attach_subquestion_routes(
-            state: dict[str, object],
-            routed_subjects: dict[str, dict[str, object]],
-        ) -> dict[str, object]:
-            del state
-            routed.update(routed_subjects)
-            return {
-                "sub_questions": [
-                    {
-                        "id": "sq1",
-                        "question": "Q1",
-                        "used_question": "Q1",
-                        "query_mode": "local",
-                        "top_k": 3,
-                        "chunk_top_k": 5,
-                        "target_subjects": ["C_program"],
-                    },
-                    {
-                        "id": "sq2",
-                        "question": "Q2",
-                        "used_question": "Q2",
-                        "query_mode": "global",
-                        "top_k": 4,
-                        "chunk_top_k": 6,
-                        "target_subjects": ["operating_systems"],
-                    },
-                ]
-            }
-
         def fake_build_subquery_tasks(state: dict[str, object]) -> dict[str, object]:
+            for sub_question in state["sub_questions"]:
+                self.assertEqual(sub_question["target_subjects"], ["C_program", "operating_systems"])
             return {
                 "subquery_tasks": [
                     {
@@ -100,7 +119,9 @@ class AgenticAnswerTests(unittest.IsolatedAsyncioTestCase):
                 ]
             }
 
-        async def fake_query_subquestion_tasks(state: dict[str, object]) -> dict[str, object]:
+        async def fake_query_subquestion_tasks(
+            state: dict[str, object]
+        ) -> dict[str, object]:
             query_rounds.append(int(state.get("query_attempt", 0)))
             return {
                 "subquery_results": [
@@ -109,7 +130,9 @@ class AgenticAnswerTests(unittest.IsolatedAsyncioTestCase):
                         "subject_id": "C_program",
                         "question": "Q1",
                         "used_question": state["sub_questions"][0]["used_question"],
-                        "answer": "第一轮结果" if len(query_rounds) == 1 else "第二轮结果",
+                        "answer": (
+                            "第一轮结果" if len(query_rounds) == 1 else "第二轮结果"
+                        ),
                         "query_status": "success",
                         "query_message": "",
                         "query_failure_reason": "",
@@ -137,7 +160,7 @@ class AgenticAnswerTests(unittest.IsolatedAsyncioTestCase):
                             **state["sub_questions"][0],
                             "sufficient": "False",
                             "judge_reason": "需要补充第二学科证据",
-                            "rewritten_question": "Q1-改写",
+                            "rewritten_question": "",
                         },
                         {
                             **state["sub_questions"][1],
@@ -163,8 +186,11 @@ class AgenticAnswerTests(unittest.IsolatedAsyncioTestCase):
                 "insufficient_subquestion_ids": [],
             }
 
-        def fake_prepare_subquestion_retry_plan(state: dict[str, object]) -> dict[str, object]:
+        def fake_prepare_subquestion_retry_plan(
+            state: dict[str, object]
+        ) -> dict[str, object]:
             self.assertEqual(state["insufficient_subquestion_ids"], ["sq1"])
+            self.assertEqual(state["sub_questions"][0]["rewritten_question"], "Q1-改写")
             return {
                 "query_attempt": 1,
                 "sub_questions": [
@@ -185,26 +211,23 @@ class AgenticAnswerTests(unittest.IsolatedAsyncioTestCase):
                 "subquery_results": [],
             }
 
+        async def fake_rewrite_insufficient_subquestions(
+            state: dict[str, object],
+        ) -> dict[str, object]:
+            self.assertEqual(state["insufficient_subquestion_ids"], ["sq1"])
+            return {
+                "sub_questions": [
+                    {
+                        **state["sub_questions"][0],
+                        "rewritten_question": "Q1-改写",
+                        "rewrite_reason": "补充第二学科限定",
+                    },
+                    state["sub_questions"][1],
+                ]
+            }
+
         async def fake_to_thread(func, *args, **kwargs):
             return func(*args, **kwargs)
-
-        async def fake_route_subquestion_subjects(
-            *,
-            sub_question: str,
-            original_question: str,
-        ) -> dict[str, object]:
-            self.assertEqual(original_question, "原始问题")
-            if sub_question == "Q1":
-                return {
-                    "primary_subject": "C_program",
-                    "target_subjects": ["C_program"],
-                    "reason": "Q1 更偏向 C语言",
-                }
-            return {
-                "primary_subject": "operating_systems",
-                "target_subjects": ["operating_systems"],
-                "reason": "Q2 更偏向操作系统",
-            }
 
         with (
             patch.object(
@@ -224,11 +247,6 @@ class AgenticAnswerTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(
                 agentic_answer_module,
-                "attach_subquestion_routes",
-                side_effect=fake_attach_subquestion_routes,
-            ),
-            patch.object(
-                agentic_answer_module,
                 "build_subquery_tasks",
                 side_effect=fake_build_subquery_tasks,
             ),
@@ -244,6 +262,11 @@ class AgenticAnswerTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(
                 agentic_answer_module,
+                "rewrite_insufficient_subquestions",
+                side_effect=fake_rewrite_insufficient_subquestions,
+            ),
+            patch.object(
+                agentic_answer_module,
                 "prepare_subquestion_retry_plan",
                 side_effect=fake_prepare_subquestion_retry_plan,
             ),
@@ -251,50 +274,43 @@ class AgenticAnswerTests(unittest.IsolatedAsyncioTestCase):
             state = await agentic_answer_module.run_question_plan_state(
                 "测试问题",
                 requested_mode="deepsearch",
-                routing_question="原始问题",
                 allowed_subject_ids=["C_program", "operating_systems"],
                 subject_working_dirs={
                     "C_program": "/tmp/C_program",
                     "operating_systems": "/tmp/operating_systems",
                 },
-                route_subquestion_subjects=fake_route_subquestion_subjects,
             )
 
         self.assertEqual(query_rounds, [0, 1])
         self.assertEqual(state["requested_mode"], "deepsearch")
         self.assertEqual(state["query_attempt"], 1)
-        self.assertEqual(routed["sq1"]["primary_subject"], "C_program")
-        self.assertEqual(routed["sq2"]["primary_subject"], "operating_systems")
         self.assertEqual(state["sub_questions"][0]["used_question"], "Q1-改写")
-        self.assertEqual(state["sub_questions"][0]["target_subjects"], ["C_program", "operating_systems"])
+        self.assertEqual(
+            state["sub_questions"][0]["target_subjects"],
+            ["C_program", "operating_systems"],
+        )
         self.assertEqual(state["subquery_results"][0]["answer"], "第二轮结果")
 
-    async def test_answer_instant_uses_routed_helper_without_graph(self) -> None:
-        with patch.object(
-            instant_answer_module,
-            "_answer_instant_query",
-            new=AsyncMock(
-                return_value={
-                    "route_mode": "hybrid",
-                    "route_reason": "routed",
-                    "answer": "instant-answer",
-                    "elapsed_ms": "11",
-                    "query_status": "success",
-                    "query_message": "",
-                    "query_failure_reason": "",
-                    "raw": {},
-                }
-            ),
-        ) as mocked_query:
-            result = await instant_answer_module.answer_instant(
-                "测试 instant",
-                thread_id="thread-2",
-                working_dir="/tmp/c",
-            )
+    async def test_instant_calls_llm_without_retrieval(self):
+        from langchain_core.messages import AIMessageChunk
+        from unittest.mock import Mock
 
-        mocked_query.assert_awaited_once_with(
-            "测试 instant",
-            working_dir="/tmp/c",
-            stream=False,
-        )
-        self.assertEqual(result["answer"], "instant-answer")
+        async def chunks(messages):
+            self.assertIn("测试", str(messages))
+            yield AIMessageChunk(content="第一段")
+            yield AIMessageChunk(content=[{"type": "text", "text": "第二段"}])
+
+        with (
+            patch.object(instant_answer_module, "llm", Mock(astream=chunks)),
+            patch(
+                "agenticRAG.agentic_runtime.get_rag",
+                new=AsyncMock(side_effect=AssertionError("不应检索")),
+            ) as get_rag,
+        ):
+            result = await instant_answer_module.answer_instant_stream("测试")
+            self.assertEqual(
+                [part async for part in result["response_iterator"]],
+                ["第一段", "第二段"],
+            )
+        get_rag.assert_not_awaited()
+        self.assertEqual(result["route_mode"], "direct")

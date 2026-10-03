@@ -1,8 +1,8 @@
-export type ModeId = "auto" | "instant" | "deepsearch";
-export type SubjectId = "auto" | "C_program" | "operating_systems" | "cybersec_lab";
+export type ModeId = "instant" | "deepsearch";
+export type SubjectId = "C_program" | "operating_systems" | "cybersec_lab";
 export type AgentStatus = "pending" | "running" | "success" | "error" | "skipped";
 export type HitType = "direct" | "related" | "normal" | "none";
-export type ExplainabilityStatus = "streaming" | "done" | "error";
+export type ExplainabilityStatus = "streaming" | "done" | "error" | "cancelled";
 
 export interface MessageDetails {
   explainability?: ExplainabilityDetails;
@@ -25,6 +25,16 @@ export interface ChatSession {
   updated_at: number;
   message_count: number;
   messages?: ChatMessage[];
+  workflow_run?: {
+    id: string;
+    execution_id: string;
+    status: "running" | "stopping" | "cancelled" | "failed" | "interrupted" | "completed";
+    mode: ModeId;
+    message: string;
+    error: string;
+    can_resume: boolean;
+    can_restart: boolean;
+  } | null;
 }
 
 export interface GraphNode {
@@ -86,6 +96,7 @@ export interface AgentExecutionStep {
   outputSummary?: string;
   durationMs?: number;
   error?: string;
+  details?: Record<string, unknown>;
 }
 
 export interface DeepSearchSubQuestion {
@@ -116,13 +127,57 @@ export interface DeepSearchReviewItem {
   subQuestionId: string;
   sufficient?: boolean | null;
   judgeReason?: string;
-  rewrittenQuestion?: string;
+}
+
+export interface DeepSearchSubqueryTask {
+  taskId?: string;
+  subQuestionId: string;
+  question?: string;
+  usedQuestion?: string;
+  subjectId?: string;
+  subjectLabel?: string;
+  queryMode?: string;
+  topK?: number | null;
+  chunkTopK?: number | null;
+}
+
+export interface DeepSearchSubqueryResult {
+  resultId?: string;
+  taskId?: string;
+  subQuestionId: string;
+  subjectId?: string;
+  subjectLabel?: string;
+  queryMode?: string;
+  topK?: number | null;
+  chunkTopK?: number | null;
+  queryStatus?: string;
+  queryMessage?: string;
+  failureReason?: string;
+  elapsedMs?: number | null;
+  answerPreview?: string;
 }
 
 export interface DeepSearchRetryInfo {
   queryAttempt: number;
   needsRetry?: boolean;
   insufficientSubquestionIds: string[];
+  rewrites?: DeepSearchRetryRewrite[];
+}
+
+export interface DeepSearchRetryRewrite {
+  attempt?: number | null;
+  subQuestionId: string;
+  question?: string;
+  previousUsedQuestion?: string;
+  rewrittenQuestion?: string;
+  appliedQuestion?: string;
+  judgeReason?: string;
+  rewriteReason?: string;
+  queryMode?: string;
+  topK?: number | null;
+  chunkTopK?: number | null;
+  targetSubjects?: string[];
+  targetSubjectLabels?: string[];
 }
 
 export interface DeepSearchSubjectLock {
@@ -135,9 +190,13 @@ export interface DeepSearchSubjectLock {
 export interface DeepSearchTrace {
   subQuestions: DeepSearchSubQuestion[];
   subQuestionRoutes: DeepSearchSubQuestionRoute[];
+  subqueryTasks?: DeepSearchSubqueryTask[];
+  subqueryResults?: DeepSearchSubqueryResult[];
   review: DeepSearchReviewItem[];
   retry: DeepSearchRetryInfo;
   subjectLock: DeepSearchSubjectLock;
+  finalAnswerPrompt?: string;
+  finalAnswerPromptChars?: number | null;
 }
 
 export interface AutoRouteTrace {
@@ -158,7 +217,20 @@ export interface AutoTimings {
   deepsearchFallbackMs?: number;
 }
 
+export interface AnswerCitations {
+  status: "cited" | "uncited" | "invalid" | "unavailable";
+  invalidIds: string[];
+  sources: { id: string; subject_id: string; chunk_id: string; source: string; title: string; text: string; cited: boolean }[];
+}
+
 export interface ExplainabilityDetails {
+  citations?: AnswerCitations;
+  responseTiming?: {
+    firstTextMs: number | null;
+    totalMs: number;
+    outputMs: number | null;
+    reviewMs: number | null;
+  };
   mode?: ModeId | string;
   modeUsed?: ModeId | string;
   subject?: SubjectId | string;
@@ -171,6 +243,7 @@ export interface ExplainabilityDetails {
   status: ExplainabilityStatus;
   createdAt?: string;
   retrievalUsed?: boolean;
+  retrievalGateResult?: string;
   retrievalGateConfidence?: number | string | null;
   retrievalGateReason?: string;
   autoRoute?: AutoRouteTrace;
@@ -181,7 +254,7 @@ export interface ExplainabilityDetails {
   deepsearchTrace?: DeepSearchTrace;
 }
 
-export type StreamEvent =
+export type StreamEvent = { id?: number } & (
   | { event: "delta"; data: { text?: string } }
   | { event: "meta"; data: Record<string, unknown> }
   | { event: "done"; data: Record<string, unknown> }
@@ -190,4 +263,4 @@ export type StreamEvent =
   | { event: "workflow_node_start"; data: AgentExecutionStep }
   | { event: "workflow_node_end"; data: AgentExecutionStep }
   | { event: "workflow_node_error"; data: AgentExecutionStep }
-  | { event: string; data: Record<string, unknown> };
+  | { event: string; data: Record<string, unknown> });

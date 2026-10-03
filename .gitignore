@@ -1,40 +1,33 @@
-.DS_Store
-**/.DS_Store
-
+# Local configuration
 .vscode/
 .env
 .env.*
 !.env.example
 
+# Python dependencies and generated files
+.venv/
+venv/
+env/
 __pycache__/
-**/__pycache__/
 *.py[cod]
-
+*.egg-info/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 htmlcov/
 
-.venv/
-venv/
-env/
-frontend/node_modules/
-frontend/dist/
-frontend/*.tsbuildinfo
-frontend/vite.config.js
-frontend/vite.config.d.ts
-frontend/tailwind.config.js
-frontend/tailwind.config.d.ts
+# Frontend dependencies and build output
+/frontend/node_modules/
+/frontend/dist/
 
-data/
-lib/
-tmp/
-output/
+# Local data and generated artifacts
+/data/
+/storage/
+/tmp/
+/output/
+.playwright-cli/
+/submission.plist
 
-codex_clang_probe.plist
-codex_probe_warn.plist
-submission.plist
-
-# Generated retrieval artifacts
-storage/
+# macOS metadata
+.DS_Store

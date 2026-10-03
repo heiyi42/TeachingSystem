@@ -108,7 +108,7 @@ common_mistakes
 评测命令：
 
 ```bash
-python utils/evaluate_problem_tutoring.py
+python scripts/evaluate_problem_tutoring.py
 ```
 
 基于 300 道题库的当前评测结果：

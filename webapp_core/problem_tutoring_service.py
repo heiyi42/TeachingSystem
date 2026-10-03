@@ -14,6 +14,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from agenticRAG.agentic_config import (
+    EMBEDDING_API_KEY,
+    EMBEDDING_BASE_URL,
+    EMBEDDING_BATCH_SIZE,
+    EMBEDDING_DIMENSION,
+    EMBEDDING_MODEL,
+)
+
 
 SubjectId = Literal["C_program", "operating_systems", "cybersec_lab", "unknown"]
 
@@ -338,24 +346,19 @@ class ProblemTutoringService:
             or self.DEFAULT_QUESTION_BANK_EMBEDDING_INDEX_PATH
         )
         self._question_bank_cache: list[dict[str, Any]] | None = None
+        self.question_bank_provider = None
         self._question_bank_embedding_index_cache: dict[str, dict[str, Any]] | None = None
         self.question_bank_embed_enabled = (
             self._env_flag("QUESTION_BANK_EMBED_ENABLED", True)
             if question_bank_embed_enabled is None
             else bool(question_bank_embed_enabled)
         )
-        self.question_bank_embed_model = (
-            os.getenv("QUESTION_BANK_EMBED_MODEL", "text-embedding-3-small").strip()
-            or "text-embedding-3-small"
-        )
+        self.question_bank_embed_model = EMBEDDING_MODEL
         self.question_bank_embed_top_k = self._safe_positive_int(
             os.getenv("QUESTION_BANK_EMBED_TOP_K", "8"),
             default=8,
         )
-        self.question_bank_embed_batch_size = self._safe_positive_int(
-            os.getenv("QUESTION_BANK_EMBED_BATCH_SIZE", "32"),
-            default=32,
-        )
+        self.question_bank_embed_batch_size = EMBEDDING_BATCH_SIZE
         self.question_bank_embed_trigger_score = self._safe_positive_float(
             os.getenv("QUESTION_BANK_EMBED_TRIGGER_SCORE", "185"),
             default=185.0,
@@ -410,6 +413,8 @@ class ProblemTutoringService:
         return dict(obj)
 
     def load_question_bank(self) -> list[dict[str, Any]]:
+        if self.question_bank_provider is not None:
+            return list(self.question_bank_provider())
         if self._question_bank_cache is not None:
             return list(self._question_bank_cache)
         path = self.question_bank_path
@@ -448,6 +453,9 @@ class ProblemTutoringService:
             "difficulty": str(item.get("difficulty", "")),
             "knowledge_points": list(item.get("knowledge_points", []) or []),
             "question": str(item.get("question", "")),
+            "family_id": str(item.get("family_id", "")),
+            "chapter_id": str(item.get("chapter_id", "")),
+            "content_version": item.get("content_version"),
             "score": round(float(score), 4),
         }
 
@@ -472,7 +480,7 @@ class ProblemTutoringService:
         ).strip()
 
     def load_question_bank_embedding_index(self) -> dict[str, dict[str, Any]]:
-        if self._question_bank_embedding_index_cache is not None:
+        if self._question_bank_embedding_index_cache is not None and self.question_bank_provider is None:
             return dict(self._question_bank_embedding_index_cache)
         path = self.question_bank_embedding_index_path
         if not self.question_bank_embed_enabled or not path.exists():
@@ -482,12 +490,27 @@ class ProblemTutoringService:
         except (OSError, json.JSONDecodeError):
             return {}
 
+        if not isinstance(payload, dict) or payload.get("model") != self.question_bank_embed_model:
+            return {}
+        if payload.get("dimensions", EMBEDDING_DIMENSION) != EMBEDDING_DIMENSION:
+            return {}
+
+        bank = {str(item.get("id", "")): item for item in self.load_question_bank()}
         index: dict[str, dict[str, Any]] = {}
-        items = payload.get("items", []) if isinstance(payload, dict) else []
+        items = payload.get("items", [])
         for item in list(items or []):
             if not isinstance(item, dict):
                 continue
             item_id = str(item.get("id", "") or "").strip()
+            source = bank.get(item_id)
+            if source is None:
+                continue
+            expected_text = self.build_question_bank_embedding_text(
+                subject_id=source.get("subject_id", ""), problem_type=source.get("problem_type", ""),
+                knowledge_points=source.get("knowledge_points", []), question=source.get("question", ""),
+            )
+            if (self.question_bank_provider is not None or item.get("text") is not None) and item.get("text") != expected_text:
+                continue
             vector = self._coerce_embedding_vector(item.get("embedding"))
             if not item_id or not vector:
                 continue
@@ -554,8 +577,9 @@ class ProblemTutoringService:
                 raw_vectors = await openai_embed.func(
                     clean_texts,
                     model=self.question_bank_embed_model,
-                    api_key=os.getenv("OPENAI_API_KEY"),
-                    base_url=os.getenv("OPENAI_BASE_URL"),
+                    api_key=EMBEDDING_API_KEY,
+                    base_url=EMBEDDING_BASE_URL,
+                    embedding_dim=EMBEDDING_DIMENSION,
                     max_token_size=0,
                 )
         except Exception:
@@ -703,9 +727,10 @@ class ProblemTutoringService:
         if not recommendations:
             return []
         by_id = {
-            str(item.get("id", "") or ""): item
+            str(item_id): item
             for item in self.load_question_bank()
-            if str(item.get("id", "") or "")
+            for item_id in [item.get("id"), *item.get("aliases", [])]
+            if item_id
         }
         examples: list[dict[str, Any]] = []
         for rec in recommendations[: max(0, int(limit))]:
@@ -714,7 +739,7 @@ class ProblemTutoringService:
                 continue
             examples.append(
                 {
-                    "id": str(item.get("id", "")),
+            "id": str(item.get("id", "")),
                     "subject_id": str(item.get("subject_id", "")),
                     "problem_type": str(item.get("problem_type", "")),
                     "difficulty": str(item.get("difficulty", "")),
@@ -728,6 +753,9 @@ class ProblemTutoringService:
                         self._short_text(str(mistake), max_len=160)
                         for mistake in list(item.get("common_mistakes", []) or [])[:3]
                     ],
+                    "assumptions": list(item.get("assumptions", [])),
+                    "review": dict(item.get("review", {})),
+                    "family_id": str(item.get("family_id", "")),
                     "use_policy": "仅模仿解题结构、步骤粒度和易错点写法；不要照搬示例题的具体数值或结论。",
                 }
             )
@@ -1132,6 +1160,7 @@ class ProblemTutoringService:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "model": self.question_bank_embed_model,
+            "dimensions": EMBEDDING_DIMENSION,
             "created_at": datetime.now(UTC).isoformat(),
             "item_count": len(records),
             "items": records,
@@ -1292,6 +1321,20 @@ class ProblemTutoringService:
         if frames_count <= 0:
             return self._solver_skipped("page_replacement", "页框数必须大于 0。", frames=frames_count)
 
+        return self.solve_page_replacement(algorithm, sequence, frames_count)
+
+    def solve_page_replacement(
+        self, algorithm: str, sequence: list[int], frames_count: int,
+        *, evictions: list[int | None] | None = None,
+    ) -> dict[str, Any]:
+        """聊天和训练中心共用同一份状态轨迹计算。"""
+        if algorithm not in {"FIFO", "LRU", "OPT", "CLOCK"}:
+            return self._solver_skipped("page_replacement", "不支持的页面置换算法。")
+        if not sequence or frames_count <= 0:
+            return self._solver_skipped("page_replacement", "访问序列不能为空，页框数必须大于 0。")
+        if evictions is not None and (algorithm != "OPT" or len(evictions) != len(sequence)):
+            return self._solver_skipped("page_replacement", "指定淘汰轨迹仅适用于 OPT，且须与访问序列等长。")
+
         memory: list[int] = []
         fifo_queue: list[int] = []
         last_used: dict[int, int] = {}
@@ -1304,6 +1347,11 @@ class ProblemTutoringService:
             before = list(memory)
             bits_before = list(reference_bits)
             hand_before = clock_hand
+            next_uses = {
+                item: next((i + 1 for i in range(index + 1, len(sequence)) if sequence[i] == item), None)
+                for item in memory
+            } if algorithm == "OPT" else {}
+            optimal_victims: list[int] = []
             victim: int | None = None
             if page in memory:
                 hits += 1
@@ -1326,11 +1374,11 @@ class ProblemTutoringService:
                     elif algorithm == "LRU":
                         victim = min(memory, key=lambda item: last_used.get(item, -1))
                     elif algorithm == "OPT":
-                        future = sequence[index + 1 :]
-                        victim = max(
-                            memory,
-                            key=lambda item: future.index(item) if item in future else 10**9,
-                        )
+                        furthest = max(position or len(sequence) + 1 for position in next_uses.values())
+                        optimal_victims = [item for item in memory if (next_uses[item] or len(sequence) + 1) == furthest]
+                        # 跟随合法并列选择；不合法选择仍按规则生成轨迹，由训练核验定位首错。
+                        selected = evictions[index] if evictions is not None else None
+                        victim = selected if selected in optimal_victims else optimal_victims[0]
                     else:
                         while reference_bits[clock_hand] == 1:
                             reference_bits[clock_hand] = 0
@@ -1359,6 +1407,8 @@ class ProblemTutoringService:
                     "clock_hand_after": clock_hand if algorithm == "CLOCK" else None,
                 }
             )
+            if algorithm == "OPT":
+                trace[-1].update(next_uses=next_uses, optimal_victims=optimal_victims)
 
         total = len(sequence)
         result = {
@@ -1483,6 +1533,21 @@ class ProblemTutoringService:
         if any(service <= 0 for _name, _arrival, service in processes):
             return self._solver_skipped("cpu_scheduling", "服务时间必须大于 0。")
 
+        return self.solve_cpu_scheduling(algorithm, processes, self._extract_quantum(text))
+
+    def solve_cpu_scheduling(
+        self,
+        algorithm: str,
+        processes: list[tuple[str, int, int]],
+        quantum: int | None = None,
+    ) -> dict[str, Any]:
+        if algorithm not in {"FCFS", "SJF", "SRTF", "RR"}:
+            return self._solver_skipped("cpu_scheduling", "不支持的调度算法。")
+        if not processes or any(arrival < 0 or service <= 0 for _, arrival, service in processes):
+            return self._solver_skipped("cpu_scheduling", "到达时间须非负，服务时间须大于 0。")
+        if len({name for name, _, _ in processes}) != len(processes):
+            return self._solver_skipped("cpu_scheduling", "进程名称不能重复。")
+
         processes = sorted(processes, key=lambda item: (item[1], self._process_sort_key(item[0])))
         timeline: list[dict[str, Any]] = []
         completion: dict[str, int] = {}
@@ -1517,7 +1582,6 @@ class ProblemTutoringService:
                 completion[name] = finish
                 time_now = finish
         elif algorithm == "RR":
-            quantum = self._extract_quantum(text)
             if quantum is None or quantum <= 0:
                 return self._solver_skipped("cpu_scheduling", "RR 调度缺少有效时间片 q。", quantum=quantum)
 
@@ -1626,7 +1690,7 @@ class ProblemTutoringService:
             else 0,
         }
         if algorithm == "RR":
-            result["quantum"] = self._extract_quantum(text)
+            result["quantum"] = quantum
         steps = [
             f"识别调度算法为 {algorithm}，共抽取 {len(processes)} 个进程。",
             "按到达时间维护就绪队列；CPU 空闲时推进到下一个到达时刻。",
@@ -1732,6 +1796,27 @@ class ProblemTutoringService:
             "final_work": work,
         }
 
+    def solve_banker(
+        self,
+        available: list[int] | tuple[int, ...],
+        allocation: dict[str, list[int] | tuple[int, ...]],
+        maximum: dict[str, list[int] | tuple[int, ...]],
+    ) -> dict[str, Any]:
+        dimension = len(available)
+        if not dimension or not allocation or set(allocation) != set(maximum):
+            raise ValueError("银行家矩阵缺少资源或进程")
+        vectors = [available, *allocation.values(), *maximum.values()]
+        if any(len(vector) != dimension or any(type(value) is not int or value < 0 for value in vector) for vector in vectors):
+            raise ValueError("资源向量须为维度一致的非负整数")
+        if any(not self._vector_leq(allocation[name], maximum[name]) for name in allocation):
+            raise ValueError("Allocation 不能超过 Max")
+        need = {name: self._vector_sub(maximum[name], allocation[name]) for name in allocation}
+        safety = self._run_banker_safety(available=tuple(available), allocation=allocation, need=need)
+        return {
+            "available": available, "allocation": allocation, "max": maximum, "need": need,
+            "safe": safety["safe"], "safe_sequence": safety["safe_sequence"], "rounds": safety["rounds"],
+        }
+
     def _solve_banker(self, text: str) -> dict[str, Any]:
         allocation = self._extract_named_vectors(text, "Allocation")
         maximum = self._extract_named_vectors(text, "Max")
@@ -1827,21 +1912,7 @@ class ProblemTutoringService:
                 ]
                 return self._solver_success("banker", result, steps)
 
-            safety = self._run_banker_safety(
-                available=available,
-                allocation=allocation,
-                need=need,
-            )
-
-            result = {
-                "available": available,
-                "allocation": allocation,
-                "max": maximum,
-                "need": need,
-                "safe": safety["safe"],
-                "safe_sequence": safety["safe_sequence"],
-                "rounds": safety["rounds"],
-            }
+            result = self.solve_banker(available, allocation, maximum)
             steps = [
                 "先逐进程计算 Need = Max - Allocation。",
                 f"初始 Work = Available = {available}。",
@@ -2007,6 +2078,11 @@ class ProblemTutoringService:
             )
         if p is None or g is None or a is None or b is None:
             return self._solver_skipped("diffie_hellman", "DH 参数不完整。")
+        return self.solve_diffie_hellman(p, g, a, b)
+
+    def solve_diffie_hellman(self, p: int, g: int, a: int, b: int) -> dict[str, Any]:
+        if any(type(value) is not int for value in (p, g, a, b)) or min(g, a, b) < 0:
+            return self._solver_skipped("diffie_hellman", "DH 参数须为非负整数。")
         if p <= 1:
             return self._solver_skipped("diffie_hellman", "模数 p 必须大于 1。", p=p)
 

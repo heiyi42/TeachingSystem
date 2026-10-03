@@ -2,7 +2,53 @@ from __future__ import annotations
 
 import unittest
 
+from webapp_core import graph_service as graph_service_module
 from webapp_core.graph_service import Neo4jGraphService
+
+
+class _RetryableNeo4jError(Exception):
+    pass
+
+
+class _FakeDriver:
+    def __init__(
+        self,
+        *,
+        error: Exception | None = None,
+        rows: list[dict[str, object]] | None = None,
+    ) -> None:
+        self.error = error
+        self.rows = rows or []
+        self.closed = False
+
+    def session(self, **kwargs: object) -> "_FakeDriver":
+        del kwargs
+        return self
+
+    def __enter__(self) -> "_FakeDriver":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        del args
+
+    def run(self, query: str, **params: object) -> list[dict[str, object]]:
+        del query, params
+        if self.error is not None:
+            raise self.error
+        return self.rows
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _DriverSequenceService(Neo4jGraphService):
+    def __init__(self, drivers: list[_FakeDriver]) -> None:
+        super().__init__(uri="bolt://demo", password="pw")
+        self.drivers = drivers
+
+    def _driver_or_error(self) -> tuple[object | None, str | None]:
+        self._driver = self.drivers.pop(0)
+        return self._driver, None
 
 
 class _FakeGraphService(Neo4jGraphService):
@@ -11,10 +57,6 @@ class _FakeGraphService(Neo4jGraphService):
         return True
 
     def _run_read(self, query: str, **params: object) -> list[dict[str, object]]:
-        if "labels(n)[0]" in query:
-            return [{"label": "Entity", "count": 2}, {"label": "Chunk", "count": 1}]
-        if "MATCH (s:Subject)" in query:
-            return [{"id": "C_program", "name": "C_program"}]
         if "MATCH (e:Entity)" in query and "RETURN e.id AS id" in query:
             return [
                 {
@@ -71,15 +113,6 @@ class _FakeGraphService(Neo4jGraphService):
 
 
 class GraphServiceTests(unittest.TestCase):
-    def test_health_returns_counts_and_subjects(self) -> None:
-        service = _FakeGraphService(uri="bolt://demo", password="pw")
-
-        result = service.health()
-
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["counts"]["Entity"], 2)
-        self.assertEqual(result["subjects"][0]["id"], "C_program")
-
     def test_local_subgraph_normalizes_nodes_edges_and_chunks(self) -> None:
         service = _FakeGraphService(uri="bolt://demo", password="pw")
 
@@ -102,6 +135,45 @@ class GraphServiceTests(unittest.TestCase):
 
         self.assertFalse(result["ok"])
         self.assertIn("neo4j", result["error"].lower())
+
+    def test_read_retries_once_after_retryable_neo4j_connection_error(self) -> None:
+        original_retryable_errors = graph_service_module._RETRYABLE_NEO4J_ERRORS
+        graph_service_module._RETRYABLE_NEO4J_ERRORS = (_RetryableNeo4jError,)
+        first_driver = _FakeDriver(error=_RetryableNeo4jError("connection expired"))
+        service = _DriverSequenceService(
+            [first_driver, _FakeDriver(rows=[{"value": 1}])]
+        )
+
+        try:
+            rows = service._run_read("RETURN 1 AS value")
+        finally:
+            graph_service_module._RETRYABLE_NEO4J_ERRORS = original_retryable_errors
+
+        self.assertEqual(rows, [{"value": 1}])
+        self.assertTrue(first_driver.closed)
+
+    def test_retryable_neo4j_error_is_sanitized_for_ui(self) -> None:
+        original_retryable_errors = graph_service_module._RETRYABLE_NEO4J_ERRORS
+        graph_service_module._RETRYABLE_NEO4J_ERRORS = (_RetryableNeo4jError,)
+        raw_error = (
+            "Failed to write data to connection IPv4Address('p-mt-demo.neo4j.io', "
+            "7687)(ResolvedIPv4Address(('198.18.5.37', 7687)))"
+        )
+        service = _DriverSequenceService(
+            [
+                _FakeDriver(error=_RetryableNeo4jError(raw_error)),
+                _FakeDriver(error=_RetryableNeo4jError(raw_error)),
+            ]
+        )
+
+        try:
+            result = service.search_entities(query="printf")
+        finally:
+            graph_service_module._RETRYABLE_NEO4J_ERRORS = original_retryable_errors
+
+        self.assertFalse(result["ok"])
+        self.assertIn("Neo4j 连接中断", result["error"])
+        self.assertNotIn("p-mt-demo.neo4j.io", result["error"])
 
     def test_query_terms_drop_course_generic_words(self) -> None:
         terms = Neo4jGraphService._query_terms(

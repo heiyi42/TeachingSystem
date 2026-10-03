@@ -64,20 +64,6 @@ class ChatRetrievalSupportTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(subject_id, "operating_systems")
 
-    def test_parse_subject_synthesis_review_response(self) -> None:
-        parsed = ChatService._parse_subject_synthesis_review_response(
-            "SUFFICIENT: true\n"
-            "REASON: Coverage is complete.\n"
-            "ANSWER:\n"
-            "## 结论\n"
-            "答案已经足够。\n"
-        )
-
-        self.assertTrue(parsed["parsed"])
-        self.assertTrue(parsed["sufficient"])
-        self.assertEqual(parsed["reason"], "Coverage is complete.")
-        self.assertIn("## 结论", parsed["answer"])
-
     async def test_run_problem_tutoring_stream_uses_prepared_prompt(self) -> None:
         service = self._build_service()
         fake_problem_tutoring = _FakeProblemTutoringService(
@@ -150,6 +136,10 @@ class ChatRetrievalSupportTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_llm_text_flushes_accumulated_chunks(self) -> None:
         service = self._build_service()
         emitted: list[str] = []
+        before_first_emit_counts: list[int] = []
+
+        async def before_first_emit() -> None:
+            before_first_emit_counts.append(len(emitted))
 
         answer = await service._stream_llm_text(
             llm_client=_FakeStreamingLLM(["Hello", " world.", " Done"]),
@@ -157,83 +147,43 @@ class ChatRetrievalSupportTests(unittest.IsolatedAsyncioTestCase):
             timeout_s=3,
             emit_text=emitted.append,
             flush_chars=6,
+            before_first_emit=before_first_emit,
         )
 
         self.assertEqual(answer, "Hello world. Done")
-        self.assertEqual(emitted, ["Hello world.", " Done"])
+        self.assertEqual(emitted, ["Hello", " world.", " Done"])
+        self.assertEqual(before_first_emit_counts, [0])
 
-    async def test_ask_instant_mode_uses_agenticrag_instant_helper(self) -> None:
+    async def test_secondary_evidence_returns_originals_without_generating_a_summary(
+        self,
+    ) -> None:
         service = self._build_service()
+        rag = AsyncMock()
+        rag.aquery_data.return_value = {
+            "status": "success",
+            "data": {"chunks": [{"chunk_id": "c", "content": "课程原文"}]},
+        }
+        rag.text_chunks.get_by_ids.return_value = [
+            {"content": "课程原文", "full_doc_id": "d"}
+        ]
+        rag.full_docs.get_by_ids.return_value = [
+            {"content": "[章节标题] 指针\n课程原文", "file_path": "/data/指针.txt"}
+        ]
         with patch.object(
-            retrieval_support_module,
-            "answer_instant",
-            new=AsyncMock(
-                return_value={
-                    "answer": "统一 instant 答案",
-                    "query_status": "success",
-                    "query_message": "",
-                    "elapsed_ms": "12",
-                    "route_mode": "hybrid",
-                    "route_reason": "routed",
-                }
-            ),
-        ) as mocked_answer:
-            result = await service.ask_instant_mode(
-                "测试问题",
-                "thread-1",
-                10,
-                working_dir="/tmp/C_program",
+            retrieval_support_module, "get_rag", new=AsyncMock(return_value=rag)
+        ) as get_rag:
+            result = await service.retrieve_subject_evidence(
+                "测试问题", "C_program", 10
             )
-
-        mocked_answer.assert_awaited_once_with(
-            "测试问题",
-            thread_id="thread-1",
-            working_dir="/tmp/C_program",
-        )
-        self.assertEqual(result["mode_used"], "instant")
-        self.assertEqual(result["answer"], "统一 instant 答案")
-        self.assertEqual(result["query_status"], "success")
-        self.assertEqual(result["elapsed_ms"], "12")
-
-    async def test_ask_instant_mode_stream_uses_agenticrag_stream_helper(self) -> None:
-        service = self._build_service()
-        emitted: list[str] = []
-
-        async def fake_iterator():
-            for chunk in ["第一段", "第二段"]:
-                yield chunk
-
-        with patch.object(
-            retrieval_support_module,
-            "answer_instant_stream",
-            new=AsyncMock(
-                return_value={
-                    "answer": "",
-                    "query_status": "success",
-                    "query_message": "",
-                    "elapsed_ms": "8",
-                    "response_iterator": fake_iterator(),
-                }
-            ),
-        ) as mocked_answer:
-            result = await service.ask_instant_mode_stream(
-                "测试问题",
-                "thread-2",
-                10,
-                working_dir="/tmp/C_program",
-                emit_text=emitted.append,
-            )
-
-        mocked_answer.assert_awaited_once_with(
-            "测试问题",
-            thread_id="thread-2",
-            working_dir="/tmp/C_program",
-        )
-        self.assertEqual(result["answer"], "第一段第二段")
-        self.assertEqual(emitted, ["第一段", "第二段"])
+        get_rag.assert_awaited_once_with("/tmp/C_program")
+        rag.aquery_llm.assert_not_awaited()
+        self.assertEqual(result["answer"], "课程原文")
+        self.assertEqual(result["evidence"][0]["source"], "指针.txt")
         self.assertEqual(result["query_status"], "success")
 
-    async def test_run_deepsearch_plan_state_delegates_to_agenticrag_kernel(self) -> None:
+    async def test_run_deepsearch_plan_state_delegates_to_agenticrag_kernel(
+        self,
+    ) -> None:
         service = self._build_service()
 
         with patch.object(
@@ -254,23 +204,114 @@ class ChatRetrievalSupportTests(unittest.IsolatedAsyncioTestCase):
         kwargs = mocked_runner.await_args.kwargs
         self.assertEqual(args, ("测试问题",))
         self.assertEqual(kwargs["requested_mode"], "deepsearch")
-        self.assertIsNone(kwargs["routing_question"])
+        self.assertNotIn("routing_question", kwargs)
         self.assertEqual(kwargs["response_language"], "zh")
         self.assertCountEqual(
             kwargs["allowed_subject_ids"],
-            list(service.subject_catalog.keys()),
+            ["C_program"],
         )
         self.assertEqual(
             kwargs["subject_working_dirs"],
             {
                 subject_id: f"/tmp/{subject_id}"
-                for subject_id in service.subject_catalog
+                for subject_id in ["C_program"]
             },
         )
-        self.assertTrue(callable(kwargs["route_subquestion_subjects"]))
+        self.assertNotIn("route_subquestion_subjects", kwargs)
         self.assertEqual(state["requested_mode"], "deepsearch")
         self.assertEqual(state["effective_strategy"], "deep")
         self.assertEqual(state["sub_questions"], ["Q1", "Q2"])
+
+    async def test_stream_routed_deepsearch_builds_prompt_before_streaming_output(
+        self,
+    ) -> None:
+        service = self._build_service()
+        emitted: list[str] = []
+        stage_events: list[tuple[str, dict[str, object], int]] = []
+
+        async def fake_plan_state(**kwargs: object) -> dict[str, object]:
+            del kwargs
+            return {
+                "question": "原问题",
+                "sub_questions": [
+                    {
+                        "id": "q1",
+                        "question": "子问题",
+                        "used_question": "子问题",
+                        "query_mode": "hybrid",
+                        "top_k": 30,
+                        "chunk_top_k": 8,
+                        "target_subjects": ["C_program"],
+                    }
+                ],
+                "subquery_tasks": [
+                    {
+                        "task_id": "q1::C_program",
+                        "sub_question_id": "q1",
+                        "question": "子问题",
+                        "used_question": "子问题",
+                        "subject_id": "C_program",
+                        "mode": "hybrid",
+                        "top_k": 30,
+                        "chunk_top_k": 8,
+                    }
+                ],
+                "subquery_results": [
+                    {
+                        "sub_question_id": "q1",
+                        "subject_id": "C_program",
+                        "answer": "证据",
+                        "query_status": "success",
+                    }
+                ],
+                "retry_rewrites": [
+                    {
+                        "attempt": 1,
+                        "sub_question_id": "q1",
+                        "previous_used_question": "子问题",
+                        "rewritten_question": "改写后的子问题",
+                        "applied_question": "改写后的子问题",
+                    }
+                ],
+                "query_attempt": 0,
+                "insufficient_subquestion_ids": [],
+                "needs_retry": False,
+            }
+
+        async def callback(stage: str, state: dict[str, object]) -> None:
+            stage_events.append((stage, dict(state), len(emitted)))
+
+        service._run_deepsearch_plan_state = fake_plan_state  # type: ignore[method-assign]
+        with patch.object(
+            retrieval_support_module, "llm", _FakeStreamingLLM(["最终回答"])
+        ):
+            result = await service._stream_routed_deepsearch_mode(
+                question="原问题",
+                timeout_s=10,
+                answer_style_instruction=(
+                    "请使用 Markdown，并优先按以下学习型结构回答：\n"
+                    "1) `## 结论`；\n"
+                    "2) `## 核心概念与机制`。\n"
+                    "不要完整罗列每个子问题。"
+                ),
+                emit_text=emitted.append,
+                workflow_stage_callback=callback,
+            )
+
+        stages = [item[0] for item in stage_events]
+        self.assertEqual(stages, ["answer_generate_start", "answer_generate_end"])
+        answer_end = stage_events[1]
+        self.assertEqual(answer_end[2], 0)
+        self.assertIn("final_answer_prompt", answer_end[1])
+        self.assertIn("## 核心概念与机制", answer_end[1]["final_answer_prompt"])
+        self.assertIn("不要完整罗列每个子问题", answer_end[1]["final_answer_prompt"])
+        self.assertEqual(emitted, ["最终回答"])
+        self.assertIn("final_answer_prompt", result["raw"])
+        self.assertEqual(
+            result["raw"]["retry_rewrites"][0]["rewritten_question"],
+            "改写后的子问题",
+        )
+        self.assertEqual(result["raw"]["subquery_tasks"][0]["top_k"], 30)
 
 
 if __name__ == "__main__":

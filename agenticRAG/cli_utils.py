@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from agenticRAG.agentic_config import OPENAI_MODEL
 from agenticRAG.short_memory import get_shared_conversation_memory
 from langchain_openai import ChatOpenAI
 
@@ -17,7 +18,7 @@ def build_memory_factory(
     keep_recent_turns: int,
 ) -> MemoryForThread:
     summary_model = (
-        ChatOpenAI(model="gpt-4o-mini", temperature=0) if use_summary_memory else None
+        ChatOpenAI(model=OPENAI_MODEL, temperature=0) if use_summary_memory else None
     )
 
     def _memory_for_thread(thread_id: str):

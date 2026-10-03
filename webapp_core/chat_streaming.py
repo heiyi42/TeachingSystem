@@ -11,6 +11,7 @@ from . import auto_runtime as auto
 
 from . import config as cfg
 from .session_store import ChatSession, safe_int
+from agenticRAG.workflow_checkpoint import checkpoint_run
 
 
 class ChatStreamingMixin:
@@ -80,14 +81,19 @@ class ChatStreamingMixin:
         fallback_title = self.store.fallback_chat_title(question, max_len=safe_max_len)
 
         async def refine_title() -> None:
-            generated_title = await self._agenerate_chat_title_from_first_question(question)
+            generated_title = await self._agenerate_chat_title_from_first_question(
+                question
+            )
             if not generated_title:
                 return
 
             should_persist = False
             with session.lock:
                 current_title = str(session.title or "").strip()
-                if current_title not in {fallback_title, generated_title} and not self.store.is_placeholder_title(current_title):
+                if current_title not in {
+                    fallback_title,
+                    generated_title,
+                } and not self.store.is_placeholder_title(current_title):
                     return
                 if current_title != generated_title:
                     session.title = generated_title
@@ -151,7 +157,7 @@ class ChatStreamingMixin:
         with self._event_subscribers_lock:
             self._event_subscribers.discard(subscriber)
 
-    def iter_chat_update_events(self):
+    def iter_chat_update_events(self, can_read=None):
         subscriber = self._register_event_subscriber()
         try:
             yield "retry: 2000\n\n"
@@ -163,6 +169,10 @@ class ChatStreamingMixin:
                     continue
                 event = str(payload.get("event", "message") or "message")
                 data = payload.get("data", {})
+                if can_read is not None and (
+                    not isinstance(data, dict) or not can_read(data.get("chat_id"))
+                ):
+                    continue
                 yield self.sse_encode(event, data if isinstance(data, dict) else {})
         finally:
             self._unregister_event_subscriber(subscriber)
@@ -171,6 +181,9 @@ class ChatStreamingMixin:
         self,
         chat_id: str,
         payload: dict[str, Any],
+        *,
+        workflow_run=None,
+        can_read=lambda: True,
     ) -> tuple[Callable[[], Any] | None, tuple[str, int] | None]:
         if not isinstance(payload, dict):
             payload = {}
@@ -191,10 +204,15 @@ class ChatStreamingMixin:
             requested_subjects
         )
         explicit_subjects = list(requested_subjects or [])
-        default_timeout = cfg.DEFAULT_TIMEOUT_BY_MODE.get(mode, cfg.AUTO_TIMEOUT_S)
+        default_timeout = cfg.DEFAULT_TIMEOUT_BY_MODE.get(mode, cfg.INSTANT_QUERY_TIMEOUT_S)
         timeout_s = safe_int(payload.get("timeout"), default_timeout, floor=1)
 
         def event_stream():
+            request_started_at = time.perf_counter()
+            first_text_at = None
+            review_ms = None
+            if workflow_run:
+                workflow_run.started = True
             event_queue: Queue = Queue()
             sentinel = object()
             workflow_started_at: dict[str, float] = {}
@@ -207,11 +225,7 @@ class ChatStreamingMixin:
             subject_route_meta: dict[str, Any] | None = None
             workflow_order = [
                 "query_understanding",
-                "retrieval_gate",
-                "subject_route",
-                "lightrag_retrieve",
                 "deepsearch_plan",
-                "deepsearch_subject_route",
                 "deepsearch_retrieve",
                 "deepsearch_review",
                 "deepsearch_retry",
@@ -221,7 +235,10 @@ class ChatStreamingMixin:
             ]
 
             def push_event(event: str, data: dict[str, Any]) -> None:
-                event_queue.put((event, dict(data or {})))
+                if workflow_run:
+                    workflow_run.emit(event, dict(data or {}))
+                else:
+                    event_queue.put((event, dict(data or {})))
 
             def record_workflow_step(step: dict[str, Any]) -> None:
                 node_id = str(step.get("nodeId", "") or "").strip()
@@ -229,6 +246,13 @@ class ChatStreamingMixin:
                     return
                 current = workflow_steps.get(node_id, {})
                 workflow_steps[node_id] = {**current, **step}
+                if workflow_run:
+                    workflow_run.save(
+                        progress={
+                            "steps": workflow_steps,
+                            "graph": graph_payload_snapshot,
+                        }
+                    )
 
             def workflow_steps_snapshot() -> list[dict[str, Any]]:
                 ordered: list[dict[str, Any]] = []
@@ -250,18 +274,32 @@ class ChatStreamingMixin:
                 nonlocal graph_payload_snapshot
                 graph_payload_snapshot = dict(payload or {})
 
-            def graph_payload_to_local_subgraphs(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+            def graph_payload_to_local_subgraphs(
+                payload: dict[str, Any] | None
+            ) -> list[dict[str, Any]]:
                 if not isinstance(payload, dict):
                     return []
-                nodes = [node for node in payload.get("nodes", []) if isinstance(node, dict)]
-                edges = [edge for edge in payload.get("edges", []) if isinstance(edge, dict)]
-                chunks = [chunk for chunk in payload.get("chunks", []) if isinstance(chunk, dict)]
-                center_ids = {str(item) for item in payload.get("centerEntityIds", []) or []}
+                nodes = [
+                    node for node in payload.get("nodes", []) if isinstance(node, dict)
+                ]
+                edges = [
+                    edge for edge in payload.get("edges", []) if isinstance(edge, dict)
+                ]
+                chunks = [
+                    chunk
+                    for chunk in payload.get("chunks", [])
+                    if isinstance(chunk, dict)
+                ]
+                center_ids = {
+                    str(item) for item in payload.get("centerEntityIds", []) or []
+                }
                 if not nodes:
                     return []
                 grouped: dict[str, list[dict[str, Any]]] = {}
                 fallback_subjects = payload.get("subjectIds", []) or []
-                fallback_subject = str(fallback_subjects[0]) if fallback_subjects else "unknown"
+                fallback_subject = (
+                    str(fallback_subjects[0]) if fallback_subjects else "unknown"
+                )
                 for node in nodes:
                     subject_id = str(node.get("subjectId", "") or fallback_subject)
                     grouped.setdefault(subject_id, []).append(node)
@@ -277,7 +315,8 @@ class ChatStreamingMixin:
                     graph_chunks = [
                         chunk
                         for chunk in chunks
-                        if not chunk.get("subjectId") or str(chunk.get("subjectId")) == subject_id
+                        if not chunk.get("subjectId")
+                        or str(chunk.get("subjectId")) == subject_id
                     ]
                     subgraphs.append(
                         {
@@ -287,7 +326,9 @@ class ChatStreamingMixin:
                             "summary": f"{len(group_nodes)} 个实体，{len(graph_chunks)} 条证据",
                             "nodes": group_nodes,
                             "edges": graph_edges,
-                            "centerEntityIds": [item for item in center_ids if item in node_ids],
+                            "centerEntityIds": [
+                                item for item in center_ids if item in node_ids
+                            ],
                             "chunkIds": [
                                 str(chunk.get("id") or chunk.get("chunkId") or "")
                                 for chunk in graph_chunks
@@ -359,6 +400,179 @@ class ChatStreamingMixin:
                 except (TypeError, ValueError):
                     return None
 
+            def _answer_preview(value: Any, limit: int = 240) -> str:
+                text = " ".join(str(value or "").split())
+                if len(text) <= limit:
+                    return text
+                return f"{text[:limit]}..."
+
+            def _normalize_subquery_tasks(raw_tasks: Any) -> list[dict[str, Any]]:
+                if not isinstance(raw_tasks, list):
+                    return []
+                tasks: list[dict[str, Any]] = []
+                for raw_item in raw_tasks:
+                    if not isinstance(raw_item, dict):
+                        continue
+                    subject_id = str(raw_item.get("subject_id") or "").strip()
+                    query_mode = str(
+                        raw_item.get("mode")
+                        or raw_item.get("query_mode")
+                        or raw_item.get("queryMode")
+                        or "hybrid"
+                    ).strip()
+                    tasks.append(
+                        {
+                            "taskId": str(raw_item.get("task_id") or "").strip(),
+                            "subQuestionId": str(
+                                raw_item.get("sub_question_id")
+                                or raw_item.get("subQuestionId")
+                                or ""
+                            ).strip(),
+                            "question": str(raw_item.get("question") or "").strip(),
+                            "usedQuestion": str(
+                                raw_item.get("used_question")
+                                or raw_item.get("usedQuestion")
+                                or raw_item.get("question")
+                                or ""
+                            ).strip(),
+                            "subjectId": subject_id,
+                            "subjectLabel": (
+                                self._subject_label(subject_id)
+                                if subject_id in self.subject_catalog
+                                else ""
+                            ),
+                            "queryMode": query_mode,
+                            "topK": _safe_optional_int(
+                                raw_item.get("top_k") or raw_item.get("topK")
+                            ),
+                            "chunkTopK": _safe_optional_int(
+                                raw_item.get("chunk_top_k") or raw_item.get("chunkTopK")
+                            ),
+                        }
+                    )
+                return tasks
+
+            def _normalize_subquery_results(raw_results: Any) -> list[dict[str, Any]]:
+                if not isinstance(raw_results, list):
+                    return []
+                results: list[dict[str, Any]] = []
+                for raw_item in raw_results:
+                    if not isinstance(raw_item, dict):
+                        continue
+                    subject_id = str(raw_item.get("subject_id") or "").strip()
+                    query_mode = str(
+                        raw_item.get("mode")
+                        or raw_item.get("query_mode")
+                        or raw_item.get("queryMode")
+                        or ""
+                    ).strip()
+                    results.append(
+                        {
+                            "resultId": str(raw_item.get("id") or "").strip(),
+                            "taskId": str(raw_item.get("task_id") or "").strip(),
+                            "subQuestionId": str(
+                                raw_item.get("sub_question_id")
+                                or raw_item.get("subQuestionId")
+                                or ""
+                            ).strip(),
+                            "subjectId": subject_id,
+                            "subjectLabel": (
+                                self._subject_label(subject_id)
+                                if subject_id in self.subject_catalog
+                                else ""
+                            ),
+                            "queryMode": query_mode,
+                            "topK": _safe_optional_int(
+                                raw_item.get("top_k") or raw_item.get("topK")
+                            ),
+                            "chunkTopK": _safe_optional_int(
+                                raw_item.get("chunk_top_k") or raw_item.get("chunkTopK")
+                            ),
+                            "queryStatus": str(
+                                raw_item.get("query_status") or ""
+                            ).strip(),
+                            "queryMessage": str(
+                                raw_item.get("query_message") or ""
+                            ).strip(),
+                            "failureReason": str(
+                                raw_item.get("query_failure_reason") or ""
+                            ).strip(),
+                            "elapsedMs": _safe_optional_int(
+                                raw_item.get("elapsed_ms") or raw_item.get("elapsedMs")
+                            ),
+                            "answerPreview": _answer_preview(raw_item.get("answer")),
+                        }
+                    )
+                return results
+
+            def _normalize_retry_rewrites(raw_rewrites: Any) -> list[dict[str, Any]]:
+                if not isinstance(raw_rewrites, list):
+                    return []
+                rewrites: list[dict[str, Any]] = []
+                for raw_item in raw_rewrites:
+                    if not isinstance(raw_item, dict):
+                        continue
+                    target_subjects = _normalize_subject_ids(
+                        raw_item.get("target_subjects")
+                        or raw_item.get("targetSubjects")
+                    )
+                    rewrites.append(
+                        {
+                            "attempt": _safe_optional_int(
+                                raw_item.get("attempt") or raw_item.get("queryAttempt")
+                            ),
+                            "subQuestionId": str(
+                                raw_item.get("sub_question_id")
+                                or raw_item.get("subQuestionId")
+                                or ""
+                            ).strip(),
+                            "question": str(raw_item.get("question") or "").strip(),
+                            "previousUsedQuestion": str(
+                                raw_item.get("previous_used_question")
+                                or raw_item.get("previousUsedQuestion")
+                                or ""
+                            ).strip(),
+                            "rewrittenQuestion": str(
+                                raw_item.get("rewritten_question")
+                                or raw_item.get("rewrittenQuestion")
+                                or ""
+                            ).strip(),
+                            "appliedQuestion": str(
+                                raw_item.get("applied_question")
+                                or raw_item.get("appliedQuestion")
+                                or ""
+                            ).strip(),
+                            "judgeReason": str(
+                                raw_item.get("judge_reason")
+                                or raw_item.get("judgeReason")
+                                or ""
+                            ).strip(),
+                            "rewriteReason": str(
+                                raw_item.get("rewrite_reason")
+                                or raw_item.get("rewriteReason")
+                                or ""
+                            ).strip(),
+                            "queryMode": str(
+                                raw_item.get("query_mode")
+                                or raw_item.get("queryMode")
+                                or ""
+                            ).strip(),
+                            "topK": _safe_optional_int(
+                                raw_item.get("top_k") or raw_item.get("topK")
+                            ),
+                            "chunkTopK": _safe_optional_int(
+                                raw_item.get("chunk_top_k") or raw_item.get("chunkTopK")
+                            ),
+                            "targetSubjects": target_subjects,
+                            "targetSubjectLabels": [
+                                self._subject_label(subject_id)
+                                for subject_id in target_subjects
+                                if subject_id in self.subject_catalog
+                            ],
+                        }
+                    )
+                return rewrites
+
             def build_deepsearch_trace(
                 result: dict[str, Any] | None,
                 mode_used: str,
@@ -389,7 +603,11 @@ class ChatStreamingMixin:
                 review_items: list[dict[str, Any]] = []
 
                 for index, raw_item in enumerate(raw_sub_questions):
-                    item = raw_item if isinstance(raw_item, dict) else {"question": raw_item}
+                    item = (
+                        raw_item
+                        if isinstance(raw_item, dict)
+                        else {"question": raw_item}
+                    )
                     sub_id = str(item.get("id") or f"q{index + 1}")
                     question_text = str(item.get("question", "") or "").strip()
                     used_question = str(
@@ -398,17 +616,13 @@ class ChatStreamingMixin:
                         or question_text
                     ).strip()
                     query_mode = str(
-                        item.get("query_mode")
-                        or item.get("queryMode")
-                        or "hybrid"
+                        item.get("query_mode") or item.get("queryMode") or "hybrid"
                     ).strip()
                     target_subjects = _normalize_subject_ids(
                         item.get("target_subjects") or item.get("targetSubjects")
                     )
                     route_reason = str(
-                        item.get("route_reason")
-                        or item.get("routeReason")
-                        or ""
+                        item.get("route_reason") or item.get("routeReason") or ""
                     ).strip()
                     ranked_subjects = _normalize_ranked_subjects(
                         item.get("ranked_subjects") or item.get("rankedSubjects")
@@ -436,7 +650,9 @@ class ChatStreamingMixin:
                             "question": question_text,
                             "usedQuestion": used_question,
                             "queryMode": query_mode,
-                            "topK": _safe_optional_int(item.get("top_k") or item.get("topK")),
+                            "topK": _safe_optional_int(
+                                item.get("top_k") or item.get("topK")
+                            ),
                             "chunkTopK": _safe_optional_int(
                                 item.get("chunk_top_k") or item.get("chunkTopK")
                             ),
@@ -461,9 +677,6 @@ class ChatStreamingMixin:
                             "subQuestionId": sub_id,
                             "sufficient": _normalize_sufficient(item.get("sufficient")),
                             "judgeReason": str(item.get("judge_reason") or "").strip(),
-                            "rewrittenQuestion": str(
-                                item.get("rewritten_question") or ""
-                            ).strip(),
                         }
                     )
 
@@ -479,9 +692,23 @@ class ChatStreamingMixin:
                         if item.get("sufficient") is False
                     ]
                 query_attempt = _safe_optional_int(raw.get("query_attempt")) or 0
-                return {
+                retry_rewrites = _normalize_retry_rewrites(raw.get("retry_rewrites"))
+                final_prompt = str(
+                    raw.get("final_answer_prompt") or raw.get("finalAnswerPrompt") or ""
+                )
+                final_prompt_chars = _safe_optional_int(
+                    raw.get("final_answer_prompt_chars")
+                    or raw.get("finalAnswerPromptChars")
+                ) or (len(final_prompt) if final_prompt else None)
+                trace = {
                     "subQuestions": sub_questions,
                     "subQuestionRoutes": sub_question_routes,
+                    "subqueryTasks": _normalize_subquery_tasks(
+                        raw.get("subquery_tasks")
+                    ),
+                    "subqueryResults": _normalize_subquery_results(
+                        raw.get("subquery_results")
+                    ),
                     "review": review_items,
                     "retry": {
                         "queryAttempt": query_attempt,
@@ -489,6 +716,7 @@ class ChatStreamingMixin:
                         "insufficientSubquestionIds": [
                             str(item) for item in insufficient_ids
                         ],
+                        "rewrites": retry_rewrites,
                     },
                     "subjectLock": {
                         "enabled": subject_lock_enabled,
@@ -501,6 +729,13 @@ class ChatStreamingMixin:
                         ),
                     },
                 }
+                if final_prompt:
+                    trace["finalAnswerPrompt"] = final_prompt
+                    trace["finalAnswerPromptChars"] = final_prompt_chars
+                return trace
+
+            def retrieval_gate_result_label() -> str:
+                return "需要检索" if retrieval_used else "免检索直答"
 
             def build_explainability_details(
                 *,
@@ -512,13 +747,19 @@ class ChatStreamingMixin:
                 route = subject_route if isinstance(subject_route, dict) else {}
                 primary_subject = str(route.get("primary_subject", "") or "")
                 subject = (
-                    requested_subjects[0]
-                    if len(requested_subjects) == 1
-                    else "auto"
+                    requested_subjects[0] if len(requested_subjects) == 1 else "auto"
                 )
-                payload = graph_payload_snapshot if isinstance(graph_payload_snapshot, dict) else {}
+                payload = (
+                    graph_payload_snapshot
+                    if isinstance(graph_payload_snapshot, dict)
+                    else {}
+                )
                 graph_ok = bool(payload.get("ok", True)) if payload else True
-                chunks = payload.get("chunks", []) if isinstance(payload.get("chunks", []), list) else []
+                chunks = (
+                    payload.get("chunks", [])
+                    if isinstance(payload.get("chunks", []), list)
+                    else []
+                )
                 details = {
                     "mode": mode,
                     "modeUsed": mode_used,
@@ -532,26 +773,15 @@ class ChatStreamingMixin:
                     "status": status,
                     "createdAt": created_at,
                     "retrievalUsed": bool(retrieval_used),
+                    "retrievalGateResult": retrieval_gate_result_label(),
                     "retrievalGateConfidence": retrieval_gate_confidence,
                     "retrievalGateReason": retrieval_gate_reason,
                 }
-                route_info = result.get("route") if isinstance(result, dict) else None
-                if mode == "auto" and isinstance(route_info, dict):
-                    details["autoRoute"] = {
-                        "chain": str(route_info.get("chain", "") or ""),
-                        "policy": str(route_info.get("policy", "") or ""),
-                        "reason": str(route_info.get("reason", "") or ""),
-                        "complexity": str(route_info.get("complexity", "") or ""),
-                        "confidence": route_info.get("confidence"),
-                        "subjects": route_info.get("subjects", []),
-                    }
-                    auto_timings = result.get("auto_timings")
-                    if isinstance(auto_timings, dict):
-                        details["autoTimings"] = dict(auto_timings)
-                    details["autoUpgraded"] = bool(result.get("upgraded", False))
-                    details["autoUpgradeReason"] = str(result.get("upgrade_reason", "") or "")
-                    if isinstance(result.get("instant_review"), dict):
-                        details["instantReview"] = dict(result.get("instant_review") or {})
+                citations = (
+                    result.get("citations") if isinstance(result, dict) else None
+                )
+                if isinstance(citations, dict):
+                    details["citations"] = citations
                 deepsearch_trace = build_deepsearch_trace(result, mode_used)
                 if deepsearch_trace is not None:
                     details["deepsearchTrace"] = deepsearch_trace
@@ -566,7 +796,8 @@ class ChatStreamingMixin:
             ) -> dict[str, Any]:
                 base = (
                     dict(result.get("message_details"))
-                    if isinstance(result, dict) and isinstance(result.get("message_details"), dict)
+                    if isinstance(result, dict)
+                    and isinstance(result.get("message_details"), dict)
                     else {}
                 )
                 base["explainability"] = build_explainability_details(
@@ -575,6 +806,23 @@ class ChatStreamingMixin:
                     mode_used=mode_used,
                     subject_route=subject_route,
                 )
+                finished_at = time.perf_counter()
+                base["explainability"]["responseTiming"] = {
+                    "firstTextMs": (
+                        int((first_text_at - request_started_at) * 1000)
+                        if first_text_at is not None
+                        else None
+                    ),
+                    "totalMs": int((finished_at - request_started_at) * 1000),
+                    "outputMs": (
+                        int((finished_at - first_text_at) * 1000)
+                        if first_text_at is not None
+                        else None
+                    ),
+                    "reviewMs": review_ms,
+                }
+                if workflow_run:
+                    base["workflow_run_id"] = workflow_run.id
                 return base
 
             def workflow_start(
@@ -598,16 +846,24 @@ class ChatStreamingMixin:
                 output_summary: str = "",
                 *,
                 duration_ms: int | None = None,
+                details: dict[str, Any] | None = None,
             ) -> None:
+                nonlocal review_ms
                 started_at = workflow_started_at.pop(node_id, time.perf_counter())
                 measured_ms = int((time.perf_counter() - started_at) * 1000)
+                if node_id in {"instant_review", "auto_merge_review"}:
+                    review_ms = (review_ms or 0) + measured_ms
                 data = {
                     "nodeId": node_id,
                     "nodeName": node_name,
                     "status": "success",
                     "outputSummary": output_summary,
-                    "durationMs": duration_ms if duration_ms is not None else measured_ms,
+                    "durationMs": (
+                        duration_ms if duration_ms is not None else measured_ms
+                    ),
                 }
+                if details:
+                    data["details"] = details
                 record_workflow_step(data)
                 push_event("workflow_node_end", data)
 
@@ -619,6 +875,7 @@ class ChatStreamingMixin:
                 input_summary: str = "",
                 output_summary: str = "",
                 duration_ms: int | None = None,
+                details: dict[str, Any] | None = None,
             ) -> None:
                 data: dict[str, Any] = {
                     "nodeId": node_id,
@@ -631,8 +888,11 @@ class ChatStreamingMixin:
                     data["outputSummary"] = output_summary
                 if duration_ms is not None:
                     data["durationMs"] = duration_ms
+                if details:
+                    data["details"] = details
                 record_workflow_step(data)
                 push_event("workflow_node_end", data)
+
 
             def workflow_error(
                 node_id: str,
@@ -653,6 +913,7 @@ class ChatStreamingMixin:
                 trace = build_deepsearch_trace(result, "deepsearch")
                 if trace is None:
                     return
+                details = {"deepsearchTrace": trace}
                 raw = result.get("raw") if isinstance(result.get("raw"), dict) else {}
                 sub_questions = trace.get("subQuestions", [])
                 sub_count = len(sub_questions) if isinstance(sub_questions, list) else 0
@@ -666,29 +927,8 @@ class ChatStreamingMixin:
                             else "完成子问题拆解"
                         ),
                         duration_ms=_safe_optional_int(raw.get("planning_ms")),
+                        details=details,
                     )
-                subject_lock = (
-                    trace.get("subjectLock")
-                    if isinstance(trace.get("subjectLock"), dict)
-                    else {}
-                )
-                lock_enabled = bool(subject_lock.get("enabled"))
-                lock_labels = subject_lock.get("subjectLabels", [])
-                lock_text = "、".join(
-                    str(item) for item in lock_labels if str(item or "").strip()
-                )
-                route_node_name = "子问题学科锁定" if lock_enabled else "子问题学科路由"
-                route_summary = (
-                    f"所有子问题锁定到 {lock_text or '当前学科'}"
-                    if lock_enabled
-                    else f"完成 {sub_count} 个子问题的学科路由"
-                )
-                workflow_complete(
-                    "deepsearch_subject_route",
-                    route_node_name,
-                    output_summary=route_summary,
-                )
-
                 subquery_results = (
                     raw.get("subquery_results", [])
                     if isinstance(raw.get("subquery_results", []), list)
@@ -702,6 +942,7 @@ class ChatStreamingMixin:
                         if subquery_results
                         else "完成子问题检索"
                     ),
+                    details=details,
                 )
 
                 retry_info = (
@@ -720,6 +961,7 @@ class ChatStreamingMixin:
                         if insufficient_count == 0
                         else f"{insufficient_count} 个子问题证据不足"
                     ),
+                    details=details,
                 )
                 workflow_complete(
                     "deepsearch_retry",
@@ -730,16 +972,17 @@ class ChatStreamingMixin:
                         if query_attempt > 0
                         else "证据评审未触发改写"
                     ),
+                    details=details,
                 )
-                answer_ms = _safe_optional_int(raw.get("answer_ms"))
                 workflow_complete(
                     "answer_generate",
                     "综合生成答案",
-                    output_summary="汇总子问题证据并生成最终答案",
-                    duration_ms=answer_ms,
+                    output_summary="组装最终回答 Prompt",
+                    duration_ms=_safe_optional_int(raw.get("final_prompt_ms")),
+                    details=details,
                 )
 
-            async def produce_events() -> None:
+            async def _produce_events() -> None:
                 nonlocal retrieval_used
                 nonlocal retrieval_gate_confidence
                 nonlocal retrieval_gate_reason
@@ -749,10 +992,14 @@ class ChatStreamingMixin:
                     "问题理解",
                     "识别请求类型、模式和上下文",
                 )
-                code_candidate = self._match_code_analysis_request(
-                    question,
-                    requested_subjects=requested_subjects,
-                    requested_by_user=code_analysis_requested,
+                code_candidate = (
+                    None
+                    if mode == "instant"
+                    else self._match_code_analysis_request(
+                        question,
+                        requested_subjects=requested_subjects,
+                        requested_by_user=code_analysis_requested,
+                    )
                 )
                 tutoring_candidate = (
                     self._match_problem_tutoring_request(
@@ -760,12 +1007,15 @@ class ChatStreamingMixin:
                         requested_subjects=requested_subjects,
                         requested_by_user=problem_tutoring_requested,
                     )
-                    if code_candidate is None
+                    if code_candidate is None and mode != "instant"
                     else None
                 )
                 fast_result_bundle = (
                     None
-                    if code_candidate is not None or tutoring_candidate is not None
+                    if mode == "instant"
+                    or mode == "deepsearch"
+                    or code_candidate is not None
+                    or tutoring_candidate is not None
                     else self._fast_smalltalk_result_bundle(
                         mode=mode,
                         text=question,
@@ -773,29 +1023,89 @@ class ChatStreamingMixin:
                     )
                 )
                 with session.lock:
-                    should_auto_rename = (
-                        len(session.turns) == 0
-                        and self.store.is_placeholder_title(session.title)
-                    )
+                    should_auto_rename = len(
+                        session.turns
+                    ) == 0 and self.store.is_placeholder_title(session.title)
                     augmented_question = (
                         question
                         if fast_result_bundle is not None
                         else self.store.build_augmented_question(session, question)
                     )
+                if workflow_run:
+                    saved_question = workflow_run.row["context"].get(
+                        "augmented_question"
+                    )
+                    if saved_question is not None:
+                        augmented_question = saved_question
+                    else:
+                        workflow_run.save(
+                            context={
+                                **workflow_run.row["context"],
+                                "augmented_question": augmented_question,
+                            }
+                        )
                 workflow_end("query_understanding", "问题理解", "请求上下文准备完成")
 
                 streamed_parts: list[str] = []
                 streamed_any = False
-                started = time.perf_counter()
+                final_response_started = False
+                final_response_closed = False
+                started = request_started_at
+
+                def ensure_final_response_started() -> None:
+                    nonlocal final_response_started
+                    if final_response_started:
+                        return
+                    final_response_started = True
+                    workflow_start(
+                        "final_response",
+                        "LLM输出",
+                        "向前端流式输出最终回答",
+                    )
+
+                def finish_final_response(
+                    output_summary: str,
+                    *,
+                    details: dict[str, Any] | None = None,
+                    duration_ms: int | None = None,
+                ) -> None:
+                    nonlocal final_response_closed
+                    if final_response_closed:
+                        return
+                    ensure_final_response_started()
+                    final_response_closed = True
+                    workflow_end(
+                        "final_response",
+                        "LLM输出",
+                        output_summary,
+                        duration_ms=duration_ms,
+                        details=details,
+                    )
+
+                def fail_final_response(error: str) -> None:
+                    nonlocal final_response_closed
+                    if not final_response_started or final_response_closed:
+                        return
+                    final_response_closed = True
+                    workflow_error("final_response", "LLM输出", error)
 
                 def emit_text(text: str) -> None:
-                    nonlocal streamed_any
+                    nonlocal streamed_any, first_text_at
                     piece = str(text or "")
                     if not piece:
                         return
+                    ensure_final_response_started()
+                    if first_text_at is None:
+                        first_text_at = time.perf_counter()
                     streamed_any = True
                     streamed_parts.append(piece)
                     push_event("delta", {"text": piece})
+
+                def replay_answer_text(answer_text: str) -> int:
+                    chunks = self.iter_answer_chunks(answer_text, chunk_size)
+                    for chunk in chunks:
+                        emit_text(chunk)
+                    return len(chunks)
 
                 def route_subject_ids(meta: dict[str, Any] | None) -> list[str]:
                     if requested_subjects:
@@ -882,13 +1192,40 @@ class ChatStreamingMixin:
                         record_graph_payload(graph_payload)
                         push_event("graph_update", graph_payload)
 
+                graph_update_task: asyncio.Task[None] | None = None
+
+                async def start_or_run_graph_update(
+                    meta: dict[str, Any] | None,
+                    *,
+                    run_in_background: bool,
+                ) -> None:
+                    nonlocal graph_update_task
+                    if not run_in_background:
+                        await maybe_emit_graph_update(meta)
+                        return
+                    graph_update_task = asyncio.create_task(
+                        maybe_emit_graph_update(meta)
+                    )
+
+                async def finish_graph_update() -> None:
+                    nonlocal graph_update_task
+                    if graph_update_task is None:
+                        return
+                    task = graph_update_task
+                    graph_update_task = None
+                    await task
+
+                async def cancel_graph_update() -> None:
+                    nonlocal graph_update_task
+                    if graph_update_task is None:
+                        return
+                    task = graph_update_task
+                    graph_update_task = None
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
                 try:
                     if code_candidate is not None:
-                        workflow_start(
-                            "retrieval_gate",
-                            "检索判断",
-                            "代码分析请求跳过知识库检索",
-                        )
                         subject_route_meta = self._build_subject_route_meta(
                             self._build_code_analysis_subject_route(
                                 requested_subjects=requested_subjects
@@ -896,16 +1233,7 @@ class ChatStreamingMixin:
                         )
                         retrieval_used = False
                         retrieval_gate_confidence = 1.0
-                        trigger = str(code_candidate.get("trigger") or "").strip()
-                        if trigger == "explicit":
-                            retrieval_gate_reason = "用户显式触发 C 代码分析"
-                        else:
-                            retrieval_gate_reason = "检测到 C 代码问题，自动进入代码分析"
-                        workflow_end(
-                            "retrieval_gate",
-                            "检索判断",
-                            retrieval_gate_reason,
-                        )
+                        retrieval_gate_reason = "用户显式触发 C 代码分析"
                         workflow_start(
                             "answer_generate",
                             "答案生成",
@@ -915,6 +1243,7 @@ class ChatStreamingMixin:
                             "meta",
                             {
                                 "retrieval_used": retrieval_used,
+                                "retrieval_gate_result": retrieval_gate_result_label(),
                                 "retrieval_gate_confidence": retrieval_gate_confidence,
                                 "retrieval_gate_reason": retrieval_gate_reason,
                                 "request_kind": "code_analysis",
@@ -932,11 +1261,6 @@ class ChatStreamingMixin:
                         result["subject_route"] = subject_route_meta
                         workflow_end("answer_generate", "答案生成", "代码分析完成")
                     elif fast_result_bundle is not None:
-                        workflow_start(
-                            "retrieval_gate",
-                            "检索判断",
-                            "本地快路径判断",
-                        )
                         (
                             result,
                             retrieval_used,
@@ -944,196 +1268,71 @@ class ChatStreamingMixin:
                             retrieval_gate_reason,
                         ) = fast_result_bundle
                         subject_route_meta = result.get("subject_route")
-                        workflow_end(
-                            "retrieval_gate",
-                            "检索判断",
-                            retrieval_gate_reason,
-                        )
                         push_event(
                             "meta",
                             {
                                 "retrieval_used": retrieval_used,
+                                "retrieval_gate_result": retrieval_gate_result_label(),
                                 "retrieval_gate_confidence": retrieval_gate_confidence,
                                 "retrieval_gate_reason": retrieval_gate_reason,
                                 "subject_route": subject_route_meta,
                             },
                         )
-                        workflow_start("answer_generate", "答案生成", "输出本地快路径回答")
+                        workflow_start(
+                            "answer_generate", "答案生成", "输出本地快路径回答"
+                        )
                         emit_text(str(result.get("answer", "")))
                         workflow_end("answer_generate", "答案生成", "回答输出完成")
                     else:
                         subject_route: dict[str, Any] | None = None
-                        if explicit_subjects:
-                            retrieval_used = True
+                        saved_route = (
+                            workflow_run.row["context"].get("routing")
+                            if workflow_run
+                            else None
+                        )
+                        if saved_route is not None and mode == "deepsearch":
+                            subject_route = saved_route["subject_route"]
+                            subject_route_meta = saved_route["subject_route_meta"]
+                            retrieval_used = saved_route["retrieval_used"]
+                            retrieval_gate_confidence = saved_route["confidence"]
+                            retrieval_gate_reason = saved_route["reason"]
+                        elif mode == "instant":
+                            retrieval_used = False
                             retrieval_gate_confidence = 1.0
-                            retrieval_gate_reason = "用户显式指定学科，强制检索"
-                            workflow_start(
-                                "retrieval_gate",
-                                "检索路由",
-                                "用户显式指定学科，强制进入课程知识库检索",
+                            retrieval_gate_reason = "Instant 直接调用模型，不检索知识库"
+                            subject_route_meta = self._fast_subject_route_meta(
+                                retrieval_gate_reason
                             )
-                            workflow_end(
-                                "retrieval_gate",
-                                "检索路由",
-                                retrieval_gate_reason,
-                            )
-                            if mode == "deepsearch":
-                                subject_route_meta = self._build_subject_route_meta(
-                                    self._subject_route_from_explicit_subjects(
-                                        explicit_subjects
-                                    )
-                                )
-                            else:
-                                workflow_start(
-                                    "subject_route",
-                                    "学科路由",
-                                    "用户显式指定学科后确认主学科",
-                                )
-                                subject_route = await self.decide_subject_route(
-                                    user_question=question,
-                                    augmented_question=augmented_question,
-                                    mode=mode,
-                                    timeout_s=timeout_s,
-                                    requested_subjects=explicit_subjects,
-                                )
-                                workflow_end(
-                                    "subject_route",
-                                    "学科路由",
-                                    str(subject_route.get("reason", "")),
-                                )
-                        elif tutoring_candidate is not None:
-                            workflow_start(
-                                "subject_route",
-                                "学科路由",
-                                "题目辅导请求识别课程范围",
-                            )
-                            subject_route = await self.decide_subject_route(
-                                user_question=question,
-                                augmented_question=augmented_question,
-                                mode=mode,
-                                timeout_s=timeout_s,
-                                requested_subjects=requested_subjects,
-                            )
-                            workflow_end(
-                                "subject_route",
-                                "学科路由",
-                                str(subject_route.get("reason", "")),
-                            )
-                            retrieval_used = True
-                            retrieval_gate_confidence = 1.0
-                            retrieval_gate_reason = "用户显式触发题目辅导"
                         elif mode == "deepsearch":
-                            if cfg.WEB_ENABLE_RETRIEVAL_GATE:
-                                workflow_start(
-                                    "retrieval_gate",
-                                    "检索判断",
-                                    "判断 DeepSearch 是否需要课程知识库",
-                                )
-                                need_retrieval, gate_conf, gate_reason = (
-                                    await self.decide_need_retrieval(
-                                        subject_ids=list(self.subject_catalog.keys()),
-                                        user_question=question,
-                                        augmented_question=augmented_question,
-                                        mode=mode,
-                                        timeout_s=timeout_s,
-                                        response_language=response_language,
-                                    )
-                                )
-                                retrieval_used = bool(need_retrieval)
-                                retrieval_gate_confidence = float(gate_conf)
-                                retrieval_gate_reason = (
-                                    str(gate_reason or "").strip() or "无"
-                                )
-                                workflow_end(
-                                    "retrieval_gate",
-                                    "检索判断",
-                                    retrieval_gate_reason,
-                                )
-                                if retrieval_used:
-                                    subject_route_meta = self._fast_subject_route_meta(
-                                        "DeepSearch 跳过请求级学科路由，拆题后对子问题单独路由"
-                                    )
-                                else:
-                                    subject_route_meta = self._fast_subject_route_meta(
-                                        "第一网关判定免检索直答"
-                                    )
-                            else:
-                                subject_route_meta = self._fast_subject_route_meta(
-                                    "DeepSearch 未启用请求级学科路由，拆题后对子问题单独路由"
-                                )
-                        elif cfg.WEB_ENABLE_RETRIEVAL_GATE:
-                            workflow_start(
-                                "retrieval_gate",
-                                "检索判断",
-                                "判断问题是否需要课程知识库",
-                            )
-                            need_retrieval, gate_conf, gate_reason = (
-                                await self.decide_need_retrieval(
-                                    subject_ids=list(self.subject_catalog.keys()),
-                                    user_question=question,
-                                    augmented_question=augmented_question,
-                                    mode=mode,
-                                    timeout_s=timeout_s,
-                                    response_language=response_language,
-                                )
-                            )
-                            retrieval_used = bool(need_retrieval)
-                            retrieval_gate_confidence = float(gate_conf)
-                            retrieval_gate_reason = (
-                                str(gate_reason or "").strip() or "无"
-                            )
-                            workflow_end(
-                                "retrieval_gate",
-                                "检索判断",
-                                retrieval_gate_reason,
-                            )
-                            if retrieval_used:
-                                workflow_start(
-                                    "subject_route",
-                                    "学科路由",
-                                    "选择需要检索的课程知识库",
-                                )
-                                subject_route = await self.decide_subject_route(
-                                    user_question=question,
-                                    augmented_question=augmented_question,
-                                    mode=mode,
-                                    timeout_s=timeout_s,
-                                    requested_subjects=requested_subjects,
-                                )
-                                workflow_end(
-                                    "subject_route",
-                                    "学科路由",
-                                    str(subject_route.get("reason", "")),
-                                )
-                            else:
-                                subject_route_meta = self._fast_subject_route_meta(
-                                    "第一网关判定免检索直答"
-                                )
-                        else:
-                            workflow_start(
-                                "subject_route",
-                                "学科路由",
-                                "未启用检索网关，直接选择课程知识库",
-                            )
-                            subject_route = await self.decide_subject_route(
-                                user_question=question,
-                                augmented_question=augmented_question,
-                                mode=mode,
-                                timeout_s=timeout_s,
-                                requested_subjects=requested_subjects,
-                            )
-                            workflow_end(
-                                "subject_route",
-                                "学科路由",
-                                str(subject_route.get("reason", "")),
+                            retrieval_used = True
+                            retrieval_gate_confidence = 1.0
+                            retrieval_gate_reason = "DeepSearch 直接检索课程资料"
+                            subject_route = self._subject_route_from_explicit_subjects(
+                                explicit_subjects or ["C_program"]
                             )
                         if subject_route is not None:
-                            subject_route_meta = self._build_subject_route_meta(subject_route)
+                            subject_route_meta = self._build_subject_route_meta(
+                                subject_route
+                            )
+                        if workflow_run:
+                            workflow_run.save(
+                                context={
+                                    **workflow_run.row["context"],
+                                    "routing": {
+                                        "subject_route": subject_route,
+                                        "subject_route_meta": subject_route_meta,
+                                        "retrieval_used": retrieval_used,
+                                        "confidence": retrieval_gate_confidence,
+                                        "reason": retrieval_gate_reason,
+                                    },
+                                }
+                            )
 
                         push_event(
                             "meta",
                             {
                                 "retrieval_used": retrieval_used,
+                                "retrieval_gate_result": retrieval_gate_result_label(),
                                 "retrieval_gate_confidence": retrieval_gate_confidence,
                                 "retrieval_gate_reason": retrieval_gate_reason,
                                 "request_kind": (
@@ -1144,7 +1343,18 @@ class ChatStreamingMixin:
                                 "subject_route": subject_route_meta,
                             },
                         )
-                        await maybe_emit_graph_update(subject_route_meta)
+                        remaining_timeout_s = int(timeout_s - (time.perf_counter() - request_started_at))
+                        if remaining_timeout_s <= 0:
+                            raise TimeoutError("请求总超时预算已耗尽")
+                        if retrieval_used and mode != "instant" and not (
+                            workflow_run and workflow_run.resume
+                        ):
+                            await start_or_run_graph_update(
+                                subject_route_meta,
+                                run_in_background=(
+                                    retrieval_used and tutoring_candidate is None
+                                ),
+                            )
 
                         if retrieval_used and tutoring_candidate is not None:
                             workflow_start(
@@ -1156,7 +1366,7 @@ class ChatStreamingMixin:
                                 user_question=question,
                                 augmented_question=augmented_question,
                                 mode=mode,
-                                timeout_s=timeout_s,
+                                timeout_s=remaining_timeout_s,
                                 subject_route=subject_route,
                                 response_language=response_language,
                                 tutoring_candidate=tutoring_candidate,
@@ -1166,23 +1376,36 @@ class ChatStreamingMixin:
                             workflow_end("answer_generate", "答案生成", "题目辅导完成")
                         elif retrieval_used:
                             if mode == "deepsearch":
-                                lock_subject_ids = [
-                                    subject_id
-                                    for subject_id in requested_subjects
-                                    if subject_id in self.subject_catalog
-                                ]
-                                lock_text = "、".join(
-                                    self._subject_label(subject_id)
-                                    for subject_id in lock_subject_ids
-                                )
-
-                                def subquestion_count(stage_state: dict[str, Any]) -> int:
+                                def subquestion_count(
+                                    stage_state: dict[str, Any]
+                                ) -> int:
                                     sub_questions = stage_state.get("sub_questions", [])
-                                    return len(sub_questions) if isinstance(sub_questions, list) else 0
+                                    return (
+                                        len(sub_questions)
+                                        if isinstance(sub_questions, list)
+                                        else 0
+                                    )
 
-                                def insufficient_count(stage_state: dict[str, Any]) -> int:
-                                    ids = stage_state.get("insufficient_subquestion_ids", [])
+                                def insufficient_count(
+                                    stage_state: dict[str, Any]
+                                ) -> int:
+                                    ids = stage_state.get(
+                                        "insufficient_subquestion_ids", []
+                                    )
                                     return len(ids) if isinstance(ids, list) else 0
+
+                                def deepsearch_stage_details(
+                                    stage_state: dict[str, Any],
+                                ) -> dict[str, Any]:
+                                    trace = build_deepsearch_trace(
+                                        {"raw": stage_state},
+                                        "deepsearch",
+                                    )
+                                    return (
+                                        {"deepsearchTrace": trace}
+                                        if trace is not None
+                                        else {}
+                                    )
 
                                 async def deepsearch_stage_callback(
                                     stage: str,
@@ -1199,39 +1422,36 @@ class ChatStreamingMixin:
                                         workflow_end(
                                             "deepsearch_plan",
                                             "拆解子问题",
-                                            f"拆解为 {count} 个子问题" if count else "完成子问题拆解",
-                                        )
-                                    elif stage == "deepsearch_subject_route_start":
-                                        workflow_start(
-                                            "deepsearch_subject_route",
-                                            "子问题学科锁定" if lock_subject_ids else "子问题学科路由",
                                             (
-                                                f"用户指定学科，锁定到 {lock_text or '当前学科'}"
-                                                if lock_subject_ids
-                                                else "为每个子问题选择目标知识库"
+                                                f"拆解为 {count} 个子问题"
+                                                if count
+                                                else "完成子问题拆解"
                                             ),
-                                        )
-                                    elif stage == "deepsearch_subject_route_end":
-                                        count = subquestion_count(stage_state)
-                                        workflow_end(
-                                            "deepsearch_subject_route",
-                                            "子问题学科锁定" if lock_subject_ids else "子问题学科路由",
-                                            (
-                                                f"所有子问题锁定到 {lock_text or '当前学科'}"
-                                                if lock_subject_ids
-                                                else f"完成 {count} 个子问题的学科路由"
+                                            details=deepsearch_stage_details(
+                                                stage_state
                                             ),
                                         )
                                     elif stage == "deepsearch_retrieve_start":
-                                        attempt = _safe_optional_int(stage_state.get("query_attempt")) or 0
+                                        attempt = (
+                                            _safe_optional_int(
+                                                stage_state.get("query_attempt")
+                                            )
+                                            or 0
+                                        )
                                         workflow_start(
                                             "deepsearch_retrieve",
                                             "子问题并行检索",
                                             f"执行第 {attempt + 1} 轮子问题并行检索",
                                         )
                                     elif stage == "deepsearch_retrieve_end":
-                                        results = stage_state.get("subquery_results", [])
-                                        result_count = len(results) if isinstance(results, list) else 0
+                                        results = stage_state.get(
+                                            "subquery_results", []
+                                        )
+                                        result_count = (
+                                            len(results)
+                                            if isinstance(results, list)
+                                            else 0
+                                        )
                                         workflow_end(
                                             "deepsearch_retrieve",
                                             "子问题并行检索",
@@ -1240,7 +1460,12 @@ class ChatStreamingMixin:
                                                 if result_count
                                                 else "完成子问题检索"
                                             ),
-                                            duration_ms=_safe_optional_int(stage_state.get("query_total_ms")),
+                                            duration_ms=_safe_optional_int(
+                                                stage_state.get("query_total_ms")
+                                            ),
+                                            details=deepsearch_stage_details(
+                                                stage_state
+                                            ),
                                         )
                                     elif stage == "deepsearch_review_start":
                                         workflow_start(
@@ -1253,22 +1478,35 @@ class ChatStreamingMixin:
                                         workflow_end(
                                             "deepsearch_review",
                                             "证据评审",
-                                            "证据充分，进入综合生成答案"
-                                            if count == 0
-                                            else f"{count} 个子问题证据不足，进入改写",
+                                            (
+                                                "证据充分，进入综合生成答案"
+                                                if count == 0
+                                                else f"{count} 个子问题证据不足，进入改写"
+                                            ),
+                                            details=deepsearch_stage_details(
+                                                stage_state
+                                            ),
                                         )
                                     elif stage == "deepsearch_retry_start":
                                         workflow_start(
                                             "deepsearch_retry",
                                             "改写子问题",
-                                            "改写证据不足的子问题并提高检索强度",
+                                            "调用 LLM 改写证据不足的子问题并提高检索强度",
                                         )
                                     elif stage == "deepsearch_retry_end":
-                                        attempt = _safe_optional_int(stage_state.get("query_attempt")) or 0
+                                        attempt = (
+                                            _safe_optional_int(
+                                                stage_state.get("query_attempt")
+                                            )
+                                            or 0
+                                        )
                                         workflow_end(
                                             "deepsearch_retry",
                                             "改写子问题",
                                             f"改写完成，进入第 {attempt + 1} 轮并行检索",
+                                            details=deepsearch_stage_details(
+                                                stage_state
+                                            ),
                                         )
                                     elif stage == "deepsearch_retry_skipped":
                                         workflow_complete(
@@ -1276,19 +1514,36 @@ class ChatStreamingMixin:
                                             "改写子问题",
                                             status="skipped",
                                             output_summary="证据评审未触发改写",
+                                            details=deepsearch_stage_details(
+                                                stage_state
+                                            ),
                                         )
                                     elif stage == "answer_generate_start":
                                         workflow_start(
                                             "answer_generate",
                                             "综合生成答案",
-                                            "汇总子问题证据并生成最终回答",
+                                            "根据子问题证据组装最终回答 Prompt",
                                         )
                                     elif stage == "answer_generate_end":
+                                        prompt_chars = _safe_optional_int(
+                                            stage_state.get("final_answer_prompt_chars")
+                                        )
+                                        if prompt_chars is None:
+                                            prompt_chars = len(
+                                                str(
+                                                    stage_state.get(
+                                                        "final_answer_prompt"
+                                                    )
+                                                    or ""
+                                                )
+                                            )
                                         workflow_end(
                                             "answer_generate",
                                             "综合生成答案",
-                                            "答案生成完成",
-                                            duration_ms=_safe_optional_int(stage_state.get("answer_ms")),
+                                            f"首段答案已生成，开始流式输出（Prompt {prompt_chars} 字符）",
+                                            details=deepsearch_stage_details(
+                                                stage_state
+                                            ),
                                         )
 
                                 result = await self._stream_mode_with_retrieval(
@@ -1298,53 +1553,31 @@ class ChatStreamingMixin:
                                     user_question=question,
                                     augmented_question=augmented_question,
                                     thread_id=session.chat_id,
-                                    timeout_s=timeout_s,
+                                    timeout_s=remaining_timeout_s,
                                     response_language=response_language,
                                     emit_text=emit_text,
                                     workflow_stage_callback=deepsearch_stage_callback,
                                 )
                                 result["subject_route"] = subject_route_meta
-                                if "deepsearch_subject_route" not in workflow_steps:
+                                if "deepsearch_retrieve" not in workflow_steps:
                                     record_deepsearch_workflow_nodes(result)
-                            else:
-                                workflow_start(
-                                    "lightrag_retrieve",
-                                    "LightRAG 检索",
-                                    "执行课程知识检索与答案生成",
-                                )
-                                result = await self._stream_mode_with_retrieval(
-                                    mode=mode,
-                                    subject_route=subject_route,
-                                    requested_subjects=requested_subjects,
-                                    user_question=question,
-                                    augmented_question=augmented_question,
-                                    thread_id=session.chat_id,
-                                    timeout_s=timeout_s,
-                                    response_language=response_language,
-                                    emit_text=emit_text,
-                                )
-                                result["subject_route"] = subject_route_meta
-                                workflow_end(
-                                    "lightrag_retrieve",
-                                    "LightRAG 检索",
-                                    "检索链路完成",
-                                )
                         else:
                             workflow_start(
                                 "answer_generate",
-                                "答案生成",
-                                "免检索直答生成",
+                                "LLM 直答",
+                                "结合会话上下文直接流式回答",
                             )
                             direct_timeout = max(
                                 1,
                                 min(
-                                    int(timeout_s),
+                                    remaining_timeout_s,
                                     max(1, int(cfg.WEB_DIRECT_ANSWER_TIMEOUT_S)),
                                 ),
                             )
                             answer = await self._stream_llm_text(
                                 llm_client=auto.auto_router_llm,
                                 prompt=self._build_direct_answer_prompt(
+                                    requested_subjects=explicit_subjects,
                                     user_question=question,
                                     augmented_question=augmented_question,
                                     mode=mode,
@@ -1359,7 +1592,7 @@ class ChatStreamingMixin:
                                 "answer": answer,
                                 "route": {
                                     "chain": "direct",
-                                    "reason": "retrieval_gate=no",
+                                    "reason": "instant_direct",
                                 },
                                 "subject_route": subject_route_meta,
                                 "upgraded": False,
@@ -1369,22 +1602,41 @@ class ChatStreamingMixin:
                                     "review": "direct_answer",
                                 },
                             }
-                            workflow_end("answer_generate", "答案生成", "直答生成完成")
-                except Exception as e:
+                            workflow_end("answer_generate", "LLM 直答", "回答生成完成")
+                    await finish_graph_update()
+                except (Exception, asyncio.CancelledError) as e:
+                    cancelled = isinstance(e, asyncio.CancelledError)
+                    error_message = (
+                        "已停止生成"
+                        if cancelled
+                        else (
+                            "生成超时，请稍后重试"
+                            if isinstance(e, TimeoutError)
+                            else f"{type(e).__name__}: {e}"
+                        )
+                    )
+                    await cancel_graph_update()
                     for node_id in list(workflow_started_at):
-                        workflow_error(node_id, node_id, f"{type(e).__name__}: {e}")
+                        if node_id == "final_response":
+                            continue
+                        workflow_error(node_id, node_id, error_message)
                     partial_answer = "".join(streamed_parts).strip()
-                    error_answer = partial_answer or f"请求失败：{e}"
-                    if partial_answer:
-                        note = f"\n\n[生成中断：{type(e).__name__}: {e}]"
+                    error_answer = partial_answer or (
+                        "已停止生成。" if cancelled else f"请求失败：{error_message}"
+                    )
+                    if partial_answer and not cancelled:
+                        note = f"\n\n[生成中断：{error_message}]"
                         error_answer = f"{partial_answer}{note}"
-                        push_event("delta", {"text": note})
+                        emit_text(note)
+                    fail_final_response(error_message)
                     elapsed_ms = int((time.perf_counter() - started) * 1000)
                     mode_used = mode
-                    assistant_meta = self.store.make_assistant_meta(mode_used, elapsed_ms)
+                    assistant_meta = self.store.make_assistant_meta(
+                        mode_used, elapsed_ms
+                    )
                     message_details = build_message_details(
                         {},
-                        status="error",
+                        status="cancelled" if cancelled else "error",
                         mode_used=mode_used,
                         subject_route=subject_route_meta,
                     )
@@ -1416,24 +1668,44 @@ class ChatStreamingMixin:
                         "upgrade_reason": "",
                         "instant_review": None,
                         "retrieval_used": retrieval_used,
+                        "retrieval_gate_result": retrieval_gate_result_label(),
                         "retrieval_gate_confidence": retrieval_gate_confidence,
                         "retrieval_gate_reason": retrieval_gate_reason,
                         "message_details": message_details,
                     }
+                    if workflow_run:
+                        self.store.persist_sessions_to_disk()
+                        workflow_run.save(
+                            status="cancelled" if cancelled else "failed",
+                            error=error_message,
+                        )
                     push_event("done", response)
-                    event_queue.put(sentinel)
                     return
 
                 answer = str(result.get("answer", "")).strip()
                 answer = self._strip_leading_question_echo(answer, question)
                 if not answer:
                     answer = "未返回有效答案，请稍后重试。"
+                mode_used = self.store.normalize_mode(result.get("mode_used", mode))
+                final_output_details: dict[str, Any] = {
+                    "outputMode": "live_stream" if streamed_any else "deferred_replay",
+                    "answerChars": len(answer),
+                }
+                final_output_summary = "最终回答已输出到前端"
                 if not streamed_any:
-                    for chunk in self.iter_answer_chunks(answer, chunk_size):
-                        emit_text(chunk)
+                    replay_chunk_count = replay_answer_text(answer)
+                    final_output_details.update(
+                        {
+                            "replayChunkCount": replay_chunk_count,
+                            "replayChunkSize": chunk_size,
+                        }
+                    )
+                finish_final_response(
+                    final_output_summary,
+                    details={"outputTrace": final_output_details},
+                )
 
                 elapsed_ms = int((time.perf_counter() - started) * 1000)
-                mode_used = self.store.normalize_mode(result.get("mode_used", mode))
                 assistant_meta = self.store.make_assistant_meta(mode_used, elapsed_ms)
                 route_chain = str((result.get("route") or {}).get("chain", "")).strip()
                 if route_chain == "code_analysis":
@@ -1448,8 +1720,6 @@ class ChatStreamingMixin:
                 elif not retrieval_used:
                     assistant_meta = f"{assistant_meta} | 免检索直答"
 
-                workflow_start("final_response", "最终输出", "保存会话并结束流")
-                workflow_end("final_response", "最终输出", "响应完成")
                 message_details = build_message_details(
                     result,
                     status="done",
@@ -1495,15 +1765,112 @@ class ChatStreamingMixin:
                     "upgrade_reason": result.get("upgrade_reason", ""),
                     "instant_review": result.get("instant_review"),
                     "retrieval_used": retrieval_used,
+                    "retrieval_gate_result": retrieval_gate_result_label(),
                     "retrieval_gate_confidence": retrieval_gate_confidence,
                     "retrieval_gate_reason": retrieval_gate_reason,
                 }
 
                 meta = dict(response)
                 meta.pop("answer", None)
+                if workflow_run:
+                    workflow_run.save(result=response)
+                    self.store.persist_sessions_to_disk()
+                    workflow_run.save(status="completed", error="")
                 push_event("meta", meta)
                 push_event("done", response)
-                event_queue.put(sentinel)
+
+            async def produce_events():
+                nonlocal graph_payload_snapshot
+                token = None
+                watcher = None
+                task = asyncio.current_task()
+
+                async def watch_cancel():
+                    while True:
+                        if workflow_run.cancellation_requested():
+                            task.cancel()
+                            return
+                        await asyncio.sleep(0.1)
+
+                try:
+                    if workflow_run:
+                        watcher = asyncio.create_task(watch_cancel())
+                        if workflow_run.checkpoint_enabled:
+                            token = checkpoint_run.set(
+                                (str(workflow_run.store.path), workflow_run.id)
+                            )
+                        push_event(
+                            "meta",
+                            {
+                                "workflow_run_id": workflow_run.id,
+                                "execution_id": workflow_run.row["execution_id"],
+                                "resumed": workflow_run.resume,
+                                "requested_mode": mode,
+                            },
+                        )
+                        if workflow_run.resume:
+                            progress = workflow_run.row["progress"] or {}
+                            graph_payload_snapshot = progress.get("graph")
+                            for node_id, step in progress.get("steps", {}).items():
+                                if (
+                                    step.get("status") in {"success", "skipped"}
+                                    and node_id != "final_response"
+                                ):
+                                    workflow_steps[node_id] = dict(step)
+                                    push_event("workflow_node_end", step)
+                        completed = workflow_run.row.get("result")
+                        if completed:
+                            with session.lock:
+                                self.store.update_session_after_answer(
+                                    session,
+                                    question=question,
+                                    answer=completed["answer"],
+                                    requested_mode=mode,
+                                    mode_used=completed["mode_used"],
+                                    elapsed_ms=int(completed["elapsed_ms"]),
+                                    assistant_meta=completed["assistant_meta"],
+                                    message_details=completed["message_details"],
+                                )
+                            self.store.persist_sessions_to_disk()
+                            workflow_run.save(status="completed", error="")
+                            for part in self.iter_answer_chunks(
+                                completed["answer"], chunk_size
+                            ):
+                                push_event("delta", {"text": part})
+                            push_event("done", completed)
+                            return
+                    await _produce_events()
+                except BaseException as exc:
+                    try:
+                        if workflow_run:
+                            workflow_run.save(
+                                status="failed", error=f"{type(exc).__name__}: {exc}"
+                            )
+                    finally:
+                        push_event(
+                            "workflow_node_error",
+                            {
+                                "nodeId": "request",
+                                "nodeName": "请求",
+                                "status": "error",
+                                "error": str(exc),
+                            },
+                        )
+                finally:
+                    if watcher is not None:
+                        watcher.cancel()
+                        await asyncio.gather(watcher, return_exceptions=True)
+                    if token is not None:
+                        checkpoint_run.reset(token)
+                    if workflow_run:
+                        try:
+                            push_event(
+                                "stream_end", {"status": workflow_run.row["status"]}
+                            )
+                        finally:
+                            workflow_run.close()
+                    else:
+                        event_queue.put(sentinel)
 
             if self.submit_async is not None:
                 future = self.submit_async(produce_events())
@@ -1516,6 +1883,7 @@ class ChatStreamingMixin:
 
                 future.add_done_callback(_consume_future)
             else:
+
                 def _runner() -> None:
                     try:
                         self.run_async(produce_events())
@@ -1524,6 +1892,15 @@ class ChatStreamingMixin:
 
                 Thread(target=_runner, name="chat-stream-fallback", daemon=True).start()
 
+            if workflow_run:
+                yield from workflow_run.store.iter_events(
+                    workflow_run.row["owner"],
+                    chat_id,
+                    workflow_run.id,
+                    workflow_run.row["execution_id"],
+                    can_read=can_read,
+                )
+                return
             while True:
                 try:
                     payload = event_queue.get(timeout=15)
@@ -1533,7 +1910,9 @@ class ChatStreamingMixin:
                 if payload is sentinel:
                     break
                 event, data = payload
-                yield self.sse_encode(str(event or "message"), data if isinstance(data, dict) else {})
+                yield self.sse_encode(
+                    str(event or "message"), data if isinstance(data, dict) else {}
+                )
 
         return event_stream, None
 

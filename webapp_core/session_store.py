@@ -34,7 +34,7 @@ def safe_float(raw: Any, default: float) -> float:
 class ChatSession:
     chat_id: str
     title: str
-    mode: str = "auto"
+    mode: str = "instant"
     pinned: bool = False
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -76,10 +76,10 @@ class SessionStore:
     @staticmethod
     def normalize_mode(raw: Any) -> str:
         mode = str(raw or "").strip().lower()
-        return mode if mode in cfg.MODE_SET else "auto"
+        return mode if mode in cfg.MODE_SET else "instant"
 
     def mode_label(self, mode: str) -> str:
-        return cfg.MODE_LABEL.get(self.normalize_mode(mode), "Auto")
+        return cfg.MODE_LABEL.get(self.normalize_mode(mode), "Instant")
 
     def make_assistant_meta(self, mode_used: str, elapsed_ms: int) -> str:
         return f"模式: {self.mode_label(mode_used)} | 耗时: {elapsed_ms} ms"
@@ -320,7 +320,7 @@ class SessionStore:
             if not chat_id:
                 continue
             title = str(row.get("title", "")).strip() or "新聊天"
-            mode = self.normalize_mode(row.get("mode", "auto"))
+            mode = self.normalize_mode(row.get("mode", "instant"))
             pinned = bool(row.get("pinned", False))
             created_at = safe_float(row.get("created_at"), time.time())
             updated_at = safe_float(row.get("updated_at"), created_at)
@@ -356,7 +356,9 @@ class SessionStore:
     def _new_chat_id(self) -> str:
         return f"chat-{uuid.uuid4().hex[:8]}"
 
-    def create_session(self, chat_id: str | None = None, mode: str = "auto") -> ChatSession:
+    def create_session(
+        self, chat_id: str | None = None, mode: str = "instant"
+    ) -> ChatSession:
         mode = self.normalize_mode(mode)
         with self._sessions_lock:
             self._chat_counter += 1
@@ -406,9 +408,7 @@ class SessionStore:
         return True
 
     @staticmethod
-    def fallback_augmented_question(
-        turns: list[tuple[str, str]], question: str
-    ) -> str:
+    def fallback_augmented_question(turns: list[tuple[str, str]], question: str) -> str:
         q = (question or "").strip()
         if not turns:
             return q
@@ -440,6 +440,23 @@ class SessionStore:
     ) -> None:
         q = question.strip()
         a = answer.strip()
+        run_id = (message_details or {}).get("workflow_run_id")
+        previous = session.messages[-1] if session.messages else {}
+        replacing = bool(
+            run_id
+            and previous.get("role") == "assistant"
+            and (previous.get("details") or {}).get("workflow_run_id") == run_id
+        )
+        if replacing:
+            if (previous.get("details", {}).get("explainability") or {}).get(
+                "status"
+            ) == "done":
+                return
+            session.messages.pop()
+            if session.messages and session.messages[-1].get("role") == "user":
+                session.messages.pop()
+            if session.turns:
+                session.turns.pop()
         if q or a:
             session.turns.append((q, a))
             if len(session.turns) > cfg.WEB_MAX_LOCAL_TURNS:
@@ -450,14 +467,22 @@ class SessionStore:
                 {
                     "role": "assistant",
                     "content": a,
-                    "meta": assistant_meta or self.make_assistant_meta(mode_used, elapsed_ms),
-                    **({"details": dict(message_details)} if isinstance(message_details, dict) else {}),
+                    "meta": assistant_meta
+                    or self.make_assistant_meta(mode_used, elapsed_ms),
+                    **(
+                        {"details": dict(message_details)}
+                        if isinstance(message_details, dict)
+                        else {}
+                    ),
                 }
             )
             if len(session.messages) > cfg.WEB_MAX_LOCAL_MESSAGES:
                 session.messages = session.messages[-cfg.WEB_MAX_LOCAL_MESSAGES :]
 
-        if session.memory is not None:
+        failed_run = run_id and (
+            (message_details or {}).get("explainability") or {}
+        ).get("status") in {"error", "cancelled"}
+        if session.memory is not None and not failed_run:
             session.memory.update(q, a)
         session.mode = self.normalize_mode(requested_mode)
         session.updated_at = time.time()
@@ -467,15 +492,3 @@ class SessionStore:
             sessions = list(self._sessions.values())
         sessions.sort(key=lambda s: (not bool(s.pinned), -float(s.updated_at)))
         return [item.to_public() for item in sessions]
-
-    def clear_chat(self, chat_id: str) -> dict[str, Any]:
-        session = self.get_or_create_session(chat_id)
-        with session.lock:
-            session.turns.clear()
-            session.messages.clear()
-            if session.memory is not None:
-                session.memory.clear()
-            session.updated_at = time.time()
-            data = session.to_public(include_messages=True)
-        self.persist_sessions_safely()
-        return data

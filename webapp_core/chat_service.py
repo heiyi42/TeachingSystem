@@ -7,14 +7,12 @@ from typing import Any, Callable
 from . import auto_runtime as auto
 
 from . import config as cfg
-from .chat_auto_orchestration import ChatAutoOrchestrationMixin
+from .chat_deepsearch import ChatDeepSearchMixin
 from .chat_code_analysis import ChatCodeAnalysisMixin
 from .chat_retrieval_support import ChatRetrievalSupportMixin
 from .chat_streaming import ChatStreamingMixin
 from .chat_routing import (
     ChatRoutingMixin,
-    RetrievalGateDecision,
-    SubjectRouteDecision,
 )
 from .code_analysis_service import CodeAnalysisService
 from .problem_tutoring_service import ProblemTutoringService
@@ -24,21 +22,15 @@ from .session_store import SessionStore
 
 class ChatService(
     ChatStreamingMixin,
-    ChatAutoOrchestrationMixin,
+    ChatDeepSearchMixin,
     ChatRetrievalSupportMixin,
     ChatCodeAnalysisMixin,
     ChatRoutingMixin,
 ):
-    GATE_PROMPT_VERSION = "v7-lightweight-retrieval-gate"
     SUBJECT_LABELS = {
         "C_program": "C语言",
         "operating_systems": "操作系统",
         "cybersec_lab": "网络安全实验",
-    }
-    SUBJECT_SCORE_FIELDS = {
-        "C_program": "c_program_score",
-        "operating_systems": "operating_systems_score",
-        "cybersec_lab": "cybersec_lab_score",
     }
     SUBJECT_KEYWORDS = {
         "C_program": [
@@ -102,12 +94,6 @@ class ChatService(
         self.store = store
         self.run_async = run_async
         self.submit_async = submit_async
-        self.llm_retrieval_gate_struct = auto.auto_router_llm.with_structured_output(
-            RetrievalGateDecision
-        )
-        self.llm_subject_router_struct = auto.auto_router_llm.with_structured_output(
-            SubjectRouteDecision
-        )
         self.code_analysis_service = CodeAnalysisService(
             compiler_bin=cfg.WEB_CODE_ANALYSIS_COMPILER or None,
             max_code_chars=cfg.WEB_CODE_ANALYSIS_MAX_CHARS,
@@ -119,8 +105,6 @@ class ChatService(
         self.problem_tutoring_service = ProblemTutoringService(auto.auto_router_llm)
         self.subject_catalog = self._build_subject_catalog()
         self.graph_service = None
-        self._retrieval_gate_cache: dict[str, tuple[bool, float, str, float]] = {}
-        self._retrieval_gate_cache_lock = Lock()
         self._event_subscribers: set[Any] = set()
         self._event_subscribers_lock = Lock()
 
@@ -171,7 +155,7 @@ class ChatService(
         requested_subjects: list[str] | None = None,
         requested_by_user: bool = False,
     ) -> dict[str, Any] | None:
-        if not cfg.WEB_ENABLE_CODE_ANALYSIS:
+        if not cfg.WEB_ENABLE_CODE_ANALYSIS or not requested_by_user:
             return None
         explicit_subjects = list(requested_subjects or [])
         if explicit_subjects and explicit_subjects != ["C_program"]:
@@ -180,16 +164,7 @@ class ChatService(
         if candidate is None:
             return None
 
-        if requested_by_user:
-            candidate["trigger"] = "explicit"
-            return candidate
-
-        task_type = self._detect_subject_task_type("C_program", text)
-        if task_type not in {"debug", "code_reading"}:
-            return None
-
-        candidate["trigger"] = "auto"
-        candidate["task_type"] = task_type
+        candidate["trigger"] = "explicit"
         return candidate
 
     def _build_code_analysis_subject_route(
@@ -583,7 +558,7 @@ class ChatService(
         mode: str,
         response_language: str,
     ) -> str:
-        mode_id = str(mode or "auto").strip().lower()
+        mode_id = str(mode or "instant").strip().lower()
         if subject_id == "C_program":
             if task_type == "concept":
                 return (
@@ -614,17 +589,6 @@ class ChatService(
                     "5) `## 易错点`；\n"
                     "6) `## 扩展`。\n"
                     "如果代码较短，尽量逐段解释。"
-                )
-            if mode_id == "deepsearch":
-                return (
-                    "请使用 Markdown，并尽量按以下结构回答：\n"
-                    "1) `## 结论`：先直接回答问题；\n"
-                    "2) `## 核心概念`：讲清定义、语义和底层机制；\n"
-                    "3) `## 代码示例`：提供能说明问题的 C 代码块；\n"
-                    "4) `## 运行过程 / 输出结果`：解释关键语句、运行结果或内存含义；\n"
-                    "5) `## 易错点`：补充常见误区、边界条件或易混概念；\n"
-                    "6) `## 扩展`：补充类似写法、优化写法、相关考点或进一步思考。\n"
-                    "若问题涉及区别、原理、调试或实现细节，务必把代码与解释对应起来。"
                 )
             if mode_id == "instant":
                 return (
@@ -702,17 +666,6 @@ class ChatService(
                     "4) `## 考试表达`。"
                 )
             if response_language == "en":
-                if mode_id == "deepsearch":
-                    return (
-                        "Use Markdown and prefer this structure:\n"
-                        "1) `## Conclusion`;\n"
-                        "2) `## Essence`;\n"
-                        "3) `## Mechanism`;\n"
-                        "4) `## Diagrammatic Understanding` when useful;\n"
-                        "5) `## Comparison` when useful;\n"
-                        "6) `## Exam-ready Wording`.\n"
-                        "Focus on process, state transitions, design rationale, and comparisons."
-                    )
                 if mode_id == "instant":
                     return (
                         "Use Markdown and prefer this structure:\n"
@@ -731,17 +684,6 @@ class ChatService(
                     "5) `## Comparison` when useful;\n"
                     "6) `## Exam-ready Wording`.\n"
                     "Operating systems answers should emphasize mechanism and comparison, not just a short definition."
-                )
-            if mode_id == "deepsearch":
-                return (
-                    "请使用 Markdown，并尽量按以下结构回答：\n"
-                    "1) `## 结论`；\n"
-                    "2) `## 本质`；\n"
-                    "3) `## 机制`；\n"
-                    "4) `## 图示化理解`（适用时）；\n"
-                    "5) `## 对比`（适用时）；\n"
-                    "6) `## 考试表达`。\n"
-                    "重点讲清流程、状态变化、设计原因和概念对比。"
                 )
             if mode_id == "instant":
                 return (
@@ -786,19 +728,6 @@ class ChatService(
                     "4) `## 修复建议`；\n"
                     "5) `## 注意事项`。"
                 )
-            if mode_id == "deepsearch":
-                return (
-                    "请使用 Markdown，并尽量按以下结构回答：\n"
-                    "1) `## 实验目标`；\n"
-                    "2) `## 实验环境`；\n"
-                    "3) `## 实验原理`；\n"
-                    "4) `## 操作步骤`；\n"
-                    "5) `## 结果观察`；\n"
-                    "6) `## 结果分析`；\n"
-                    "7) `## 常见问题`；\n"
-                    "8) `## 实验结论`。\n"
-                    "如果涉及安全风险、权限、环境差异或排错，请明确写出。"
-                )
             if mode_id == "instant":
                 return (
                     "请使用 Markdown，并优先按以下结构回答：\n"
@@ -829,6 +758,59 @@ class ChatService(
             "请使用 Markdown 输出，尽量避免单段大白话，优先分点或分小节说明。"
         )
 
+    @staticmethod
+    def _deepsearch_learning_answer_style_instruction(response_language: str) -> str:
+        if str(response_language or "").strip().lower() == "en":
+            return (
+                "Use Markdown. DeepSearch final answers must use this "
+                "learning-oriented structure as the visible top-level outline:\n"
+                "1) `## Conclusion`: answer the original question first;\n"
+                "2) `## Problem Decomposition and Synthesis`: summarize how the "
+                "sub-questions support the final judgment;\n"
+                "3) `## Core Concepts and Mechanism`: explain definitions, process, "
+                "state changes, or design rationale;\n"
+                "4) `## Key Evidence`: synthesize the retrieved evidence without "
+                "copying every sub-question verbatim;\n"
+                "5) `## Example / Scenario`: include a code example, scenario, or "
+                "step-by-step walkthrough when useful;\n"
+                "6) `## Pitfalls / Boundary Conditions`: name common mistakes or "
+                "edge cases;\n"
+                "7) `## Extension and Exam-ready Wording`: add related points or "
+                "answer-ready phrasing;\n"
+                "8) `## Uncertainties`: mention insufficient or failed evidence.\n"
+                "Do not use retrieved-answer headings as the final top-level "
+                "headings. Fold code examples, output analysis, and pitfalls into "
+                "the sections above. Show sub-question results only as a concise "
+                "summary; do not list every sub-question, route, and raw evidence "
+                "as a full trace."
+            )
+        return (
+            "请使用 Markdown。DeepSearch 最终答案必须使用下面这些可见一级标题作为主结构：\n"
+            "1) `## 结论`：先直接回答原问题；\n"
+            "2) `## 问题拆解与综合判断`：摘要说明拆题如何支撑最终判断；\n"
+            "3) `## 核心概念与机制`：讲清定义、流程、状态变化或设计原因；\n"
+            "4) `## 关键依据`：综合检索证据，不要逐条粘贴每个子问题原文；\n"
+            "5) `## 示例 / 场景化说明`：适用时给代码、场景或步骤化推演；\n"
+            "6) `## 易错点 / 边界条件`：指出常见误区、限制或易混概念；\n"
+            "7) `## 扩展与考试表达`：补充相关考点、迁移理解或可直接背诵的表述；\n"
+            "8) `## 不确定点`：说明证据不足、检索失败或无法确认的部分。\n"
+            "不要把检索证据里的旧标题直接当作最终一级标题；代码示例、运行结果、"
+            "易错点等内容要归并到上面的 DeepSearch 结构中。拆题结果只做摘要展示："
+            "不要完整罗列每个子问题、学科路由和原始证据，要把它们消化成面向学习者的综合讲解。"
+        )
+
+    @staticmethod
+    def _requested_brief_style(user_question: str) -> str:
+        if re.search(r"(?:不要|不用|无需).{0,3}(?:简短|简要|简洁|一句话|一段话)", user_question):
+            return ""
+        if not re.search(r"简短|简要|简洁|一句话|一段话|\b(?:brief(?:ly)?|concise|one sentence|one paragraph)\b", user_question, re.I):
+            return ""
+        return (
+            "用户明确要求简短回答，优先遵守其句数或长度要求。直接回答核心问题，"
+            "只保留必要的条件、依据和不确定性说明，不套用固定章节，不追加练习、扩展或非必要示例。"
+            "若要求引用，保留真实检索出处；证据不足就说明，不编造来源。"
+        )
+
     def _apply_answer_style_to_question(
         self,
         question: str,
@@ -840,7 +822,7 @@ class ChatService(
     ) -> str:
         language_instruction = self._response_language_instruction(response_language)
         task_type = self._detect_subject_task_type(subject_id, user_question)
-        style_instruction = self._subject_answer_style_instruction(
+        style_instruction = self._requested_brief_style(user_question) or self._subject_answer_style_instruction(
             subject_id,
             task_type,
             mode,

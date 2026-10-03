@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib
 import json
+import tempfile
+from pathlib import Path
 import unittest
 import uuid
 import warnings
@@ -18,16 +20,32 @@ class WebappCodeAnalysisStreamTests(unittest.TestCase):
                 category=Warning,
             )
             cls.webapp = importlib.import_module("webapp")
-        cls.client = cls.webapp.app.test_client()
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.temporary.cleanup)
+        cls.app = cls.webapp.create_app(
+            learning_store_path=Path(cls.temporary.name) / "learning.sqlite3"
+        )
+        cls.client = cls.app.test_client()
+        response = cls.client.post(
+            "/api/identity/setup",
+            json={
+                "username": "stream_admin",
+                "name": "测试管理员",
+                "password": "test-identity-password",
+            },
+        )
+        assert response.status_code == 200
 
     def setUp(self) -> None:
+        self.store = self.webapp.get_store(self.app)
+        self.chat_service = self.webapp.get_chat_service(self.app)
         self.chat_id = f"test-code-analysis-{uuid.uuid4().hex[:8]}"
-        with patch.object(self.webapp.store, "persist_sessions_safely", return_value=None):
-            self.webapp.store.create_session(chat_id=self.chat_id, mode="auto")
+        with patch.object(self.store, "persist_sessions_safely", return_value=None):
+            self.store.create_session(chat_id=self.chat_id, mode="auto")
 
     def tearDown(self) -> None:
-        with patch.object(self.webapp.store, "persist_sessions_safely", return_value=None):
-            self.webapp.store.delete_session(self.chat_id)
+        with patch.object(self.store, "persist_sessions_safely", return_value=None):
+            self.store.delete_session(self.chat_id)
 
     @staticmethod
     def _parse_sse_events(payload: str) -> list[tuple[str, dict[str, object]]]:
@@ -76,14 +94,14 @@ class WebappCodeAnalysisStreamTests(unittest.TestCase):
             }
 
         with (
-            patch.object(self.webapp.store, "persist_sessions_safely", return_value=None),
+            patch.object(self.store, "persist_sessions_safely", return_value=None),
             patch.object(
-                self.webapp.chat_service,
+                self.chat_service,
                 "_schedule_chat_title_refinement",
                 return_value=None,
             ),
             patch.object(
-                self.webapp.chat_service,
+                self.chat_service,
                 "_run_code_analysis_stream",
                 new=AsyncMock(side_effect=fake_run_code_analysis_stream),
             ),
@@ -92,7 +110,7 @@ class WebappCodeAnalysisStreamTests(unittest.TestCase):
                 f"/api/chats/{self.chat_id}/messages/stream",
                 json={
                     "message": "请分析\n```c\nint main(void){return 0;}\n```",
-                    "mode": "auto",
+                    "mode": "deepsearch",
                     "subjects": ["C_program"],
                     "code_analysis": True,
                     "stream_chunk_size": 48,
@@ -109,10 +127,14 @@ class WebappCodeAnalysisStreamTests(unittest.TestCase):
         self.assertIn("done", event_names)
 
         meta_events = [data for name, data in events if name == "meta"]
-        self.assertTrue(any(data.get("request_kind") == "code_analysis" for data in meta_events))
+        self.assertTrue(
+            any(data.get("request_kind") == "code_analysis" for data in meta_events)
+        )
 
         delta_events = [data for name, data in events if name == "delta"]
-        self.assertTrue(any(data.get("text") == "结构分析已生成。" for data in delta_events))
+        self.assertTrue(
+            any(data.get("text") == "结构分析已生成。" for data in delta_events)
+        )
 
         done_events = [data for name, data in events if name == "done"]
         self.assertEqual(len(done_events), 1)
@@ -122,27 +144,18 @@ class WebappCodeAnalysisStreamTests(unittest.TestCase):
         self.assertFalse(done["retrieval_used"])
         self.assertIn("代码分析", str(done["assistant_meta"]))
 
-    def test_short_definition_question_uses_retrieval_gate_instead_of_forced_retrieval(
+    def test_legacy_auto_request_becomes_instant_without_retrieval(
         self,
     ) -> None:
-        fake_decide_need_retrieval = AsyncMock(
-            return_value=(False, 0.93, "通用短定义，免检索直答")
-        )
-
         with (
-            patch.object(self.webapp.store, "persist_sessions_safely", return_value=None),
+            patch.object(self.store, "persist_sessions_safely", return_value=None),
             patch.object(
-                self.webapp.chat_service,
+                self.chat_service,
                 "_schedule_chat_title_refinement",
                 return_value=None,
             ),
             patch.object(
-                self.webapp.chat_service,
-                "decide_need_retrieval",
-                new=fake_decide_need_retrieval,
-            ),
-            patch.object(
-                self.webapp.chat_service,
+                self.chat_service,
                 "_stream_llm_text",
                 new=AsyncMock(return_value="指针是一个存储地址的变量。"),
             ),
@@ -164,8 +177,7 @@ class WebappCodeAnalysisStreamTests(unittest.TestCase):
         done = done_events[0]
         self.assertFalse(done["retrieval_used"])
         self.assertEqual(done["route"]["chain"], "direct")
-        self.assertEqual(done["retrieval_gate_reason"], "通用短定义，免检索直答")
-        fake_decide_need_retrieval.assert_awaited_once()
+        self.assertEqual(done["mode_used"], "instant")
 
 
 if __name__ == "__main__":

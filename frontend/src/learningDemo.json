@@ -1,0 +1,103 @@
+{
+  "correct": [
+    {
+      "frames": "1",
+      "event": "fault",
+      "evicted": "—"
+    },
+    {
+      "frames": "1, 2",
+      "event": "fault",
+      "evicted": "—"
+    },
+    {
+      "frames": "1, 2, 3",
+      "event": "fault",
+      "evicted": "—"
+    },
+    {
+      "frames": "1, 2, 3",
+      "event": "hit",
+      "evicted": "—"
+    },
+    {
+      "frames": "1, 3, 4",
+      "event": "fault",
+      "evicted": "2"
+    },
+    {
+      "frames": "1, 2, 4",
+      "event": "fault",
+      "evicted": "3"
+    }
+  ],
+  "wrong": [
+    {
+      "frames": "1",
+      "event": "fault",
+      "evicted": "—"
+    },
+    {
+      "frames": "1, 2",
+      "event": "fault",
+      "evicted": "—"
+    },
+    {
+      "frames": "1, 2, 3",
+      "event": "fault",
+      "evicted": "—"
+    },
+    {
+      "frames": "1, 2, 3",
+      "event": "hit",
+      "evicted": "—"
+    },
+    {
+      "frames": "2, 3, 4",
+      "event": "fault",
+      "evicted": "1"
+    },
+    {
+      "frames": "2, 3, 4",
+      "event": "hit",
+      "evicted": "—"
+    }
+  ],
+  "retest": [
+    {
+      "frames": "2",
+      "event": "fault",
+      "evicted": "—"
+    },
+    {
+      "frames": "2, 4",
+      "event": "fault",
+      "evicted": "—"
+    },
+    {
+      "frames": "2, 4, 6",
+      "event": "fault",
+      "evicted": "—"
+    },
+    {
+      "frames": "2, 4, 6",
+      "event": "hit",
+      "evicted": "—"
+    },
+    {
+      "frames": "2, 4, 6",
+      "event": "hit",
+      "evicted": "—"
+    },
+    {
+      "frames": "2, 4, 8",
+      "event": "fault",
+      "evicted": "6"
+    },
+    {
+      "frames": "4, 6, 8",
+      "event": "fault",
+      "evicted": "2"
+    }
+  ]
+}

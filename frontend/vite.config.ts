@@ -7,7 +7,6 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": "http://127.0.0.1:7860",
-      "/legacy": "http://127.0.0.1:7860"
-    }
-  }
+    },
+  },
 });

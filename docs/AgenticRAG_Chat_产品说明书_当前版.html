@@ -353,24 +353,19 @@
         <td>首页与聊天界面</td>
       </tr>
       <tr>
-        <td><code>/api/modes</code></td>
-        <td>GET</td>
-        <td>获取模式列表</td>
-      </tr>
-      <tr>
         <td><code>/api/chats</code></td>
         <td>GET / POST</td>
         <td>聊天列表获取 / 创建聊天</td>
       </tr>
       <tr>
         <td><code>/api/chats/&lt;chat_id&gt;</code></td>
-        <td>GET / DELETE / POST</td>
-        <td>获取聊天详情 / 删除聊天</td>
+        <td>GET</td>
+        <td>获取聊天详情</td>
       </tr>
       <tr>
         <td><code>/api/chats/&lt;chat_id&gt;/delete</code></td>
         <td>POST</td>
-        <td>删除聊天的兼容别名接口</td>
+        <td>删除聊天</td>
       </tr>
       <tr>
         <td><code>/api/chats/&lt;chat_id&gt;/mode</code></td>
@@ -386,11 +381,6 @@
         <td><code>/api/chats/&lt;chat_id&gt;/rename</code></td>
         <td>POST</td>
         <td>重命名聊天</td>
-      </tr>
-      <tr>
-        <td><code>/api/chats/&lt;chat_id&gt;/clear</code></td>
-        <td>POST</td>
-        <td>清空聊天内容</td>
       </tr>
       <tr>
         <td><code>/api/chats/&lt;chat_id&gt;/messages/stream</code></td>
@@ -488,7 +478,7 @@
 
   <h2>12. 当前技术架构</h2>
   <ul>
-    <li>前端：单页 Web 界面，位于 <code>templates/chat.html</code>，负责会话交互、模式与学科切换、流式渲染。</li>
+    <li>前端：React 单页 Web 界面，位于 <code>frontend/src/</code>，负责会话交互、课程训练、账号与班级管理、流式渲染。</li>
     <li>后端入口：<code>webapp.py</code>，基于 Flask 提供页面与 API。</li>
     <li>核心编排：<code>webapp_core/chat_service.py</code> 聚合路由、流式输出、检索支持、Auto 编排、题目辅导与代码分析能力。</li>
     <li>会话层：<code>webapp_core/session_store.py</code> 负责会话状态、本地持久化与摘要记忆快照。</li>

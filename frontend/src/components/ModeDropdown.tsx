@@ -5,14 +5,13 @@ import type { ModeId } from "../types";
 
 const MODE_OPTIONS: Array<{ id: ModeId; label: string; description: string }> = [
   { id: "instant", label: "Instant", description: "适用于快速问答和短定义解释" },
-  { id: "auto", label: "Auto", description: "自动判断检索策略和回答路径" },
   { id: "deepsearch", label: "DeepSearch", description: "适用于复杂问题、深度检索和多跳推理" }
 ];
 
 export function ModeDropdown({ value, onChange }: { value: ModeId; onChange: (mode: ModeId) => void }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const current = MODE_OPTIONS.find((item) => item.id === value) || MODE_OPTIONS[1];
+  const current = MODE_OPTIONS.find((item) => item.id === value) || MODE_OPTIONS[0];
 
   useDropdownDismiss(rootRef, () => setOpen(false));
 

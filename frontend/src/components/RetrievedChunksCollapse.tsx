@@ -1,62 +1,30 @@
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
-import type { RetrievedChunk } from "../types";
+import type { AnswerCitations } from "../types";
 
-export function RetrievedChunksCollapse({ chunks }: { chunks: RetrievedChunk[] }) {
-  const [sectionOpen, setSectionOpen] = useState(false);
-  const [openIds, setOpenIds] = useState<Set<string>>(new Set());
-
-  function toggle(id: string) {
-    setOpenIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
+export function RetrievedChunksCollapse({ citations }: { citations?: AnswerCitations }) {
+  const [open, setOpen] = useState(false);
+  const sources = citations?.sources || [];
+  const cited = sources.filter(source => source.cited);
   return (
     <div className="trace-block">
-      <button className="trace-section-toggle" type="button" onClick={() => setSectionOpen((value) => !value)}>
+      <button className="trace-section-toggle" type="button" onClick={() => setOpen(!open)}>
         <span>
-          <span className="trace-heading">引用证据</span>
-          <span className="trace-section-summary">{chunks.length ? `${chunks.length} 条证据，点击展开` : "暂无引用 chunk"}</span>
+          <span className="trace-heading">引用原文</span>
+          <span className="trace-section-summary">{cited.length ? `${cited.length} 条引用，点击核对` : sources.length ? "已检索资料，回答未标注引用" : "本次没有可核对的原文引用"}</span>
         </span>
-        <ChevronDown size={16} className={sectionOpen ? "rotate-180 transition-transform" : "transition-transform"} />
+        <ChevronDown size={16} className={open ? "rotate-180 transition-transform" : "transition-transform"} />
       </button>
-      {sectionOpen ? (
-        chunks.length ? (
-        <div className="chunk-list">
-          {chunks.map((chunk) => {
-            const id = chunk.id || chunk.chunkId;
-            const open = openIds.has(id);
-            return (
-              <article className="chunk-card" key={id}>
-                <button type="button" className="chunk-toggle" onClick={() => toggle(id)}>
-                  <span>
-                    <span className="font-mono text-[11px] text-stone-500">{chunk.chunkId || id}</span>
-                    <span className="mt-1 line-clamp-2 text-sm text-stone-700">
-                      {chunk.preview || chunk.content || "暂无摘要"}
-                    </span>
-                  </span>
-                  <ChevronDown size={16} className={open ? "rotate-180 transition-transform" : "transition-transform"} />
-                </button>
-                {open ? (
-                  <div className="chunk-content">
-                    <div className="mb-2 text-xs text-stone-500">
-                      {chunk.subjectId || "unknown"} {chunk.filePath ? `· ${chunk.filePath}` : ""}
-                    </div>
-                    <p>{chunk.content || chunk.preview}</p>
-                  </div>
-                ) : null}
-              </article>
-            );
-          })}
-        </div>
-        ) : (
-          <div className="empty-inline">暂无引用 chunk。</div>
-        )
-      ) : null}
+      {open ? <div className="chunk-list">
+        {citations?.status === "invalid" ? <p className="empty-inline">部分引用编号无对应原文，已标记为“出处未核实”。</p> : null}
+        {sources.length ? sources.map(source => <details className="chunk-card" key={source.id}>
+          <summary className="chunk-toggle">[{source.id}] {source.title}{source.cited ? " · 已引用" : " · 检索资料"}</summary>
+          <div className="chunk-content">
+            <div className="mb-2 text-xs text-stone-500">{source.source}</div>
+            <p style={{ whiteSpace: "pre-wrap" }}>{source.text}</p>
+          </div>
+        </details>) : <p className="empty-inline">没有检索到可核对的课程原文时，不把图谱关联材料当作回答出处。</p>}
+      </div> : null}
     </div>
   );
 }
