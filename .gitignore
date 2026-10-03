@@ -23,6 +23,7 @@ htmlcov/
 
 # Local data and generated artifacts
 /data/
+/docs/
 /storage/
 /tmp/
 /output/

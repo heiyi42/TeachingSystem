@@ -30,13 +30,13 @@ AgenticRAG 是一个面向三门固定课程的 Web 学习助手，当前覆盖�
 - `webapp_core/graph_service.py`：Neo4j 图谱查询服务，供前端局部子图面板使用
 - `agenticRAG/`：检索运行时、回答辅助函数、短时记忆与结构化 schema
 - `frontend/`：React + TypeScript 可视化前端
-- `data/`：原始课程资料、题库数据和聊天持久化文件
+- `data/`：本地课程资料、题库数据和聊天持久化文件，不随仓库分发
 - `storage/`：每门课程对应的 LightRAG working dir，运行时直接读取
 - `scripts/`：启动、课程资料准备、索引构建、维护和验收工具
 - `tests/`：当前行为边界最清晰的回归测试
-- `docs/`：产品说明与模块报告
+- `docs/`：本地设计与使用记录，不随仓库分发
 
-完整目录职责和工具入口见 [项目结构](PROJECT_STRUCTURE.md)，文档分类见 [文档索引](docs/README.md)。
+完整目录职责和工具入口见 [项目结构](PROJECT_STRUCTURE.md)。
 
 ## 运行前提
 
@@ -145,23 +145,19 @@ python webapp.py
 
 ## 训练中心
 
-三门课程的章节盘点、题库质量和建设顺序见 [三门课程建设清单](docs/three_course_plan.md)。
-
 在新版侧栏进入“训练中心”。当前内置 67 道结构化练习：操作系统 FIFO、LRU、OPT、FCFS、RR、SJF、SRTF 共 35 道，银行家算法安全性检查 5 道；C 语言循环、数组指针、函数传参跟踪及返回语句订正共 12 道；网络安全实验 DH 计算、角色权限矩阵、模拟日志证据各 5 道。过程题每次提交定位首个错误；返回语句订正检查限定输入范围并显示失败用例。OS 与 DH 规则计算与聊天中的题目辅导共用求解器，训练核验无需调用模型。
 
 作答自动保存；提示、查看解析、每次提交及复测关联写入 SQLite。学习记录按登录账号隔离，教师只能通过班级入口查看所属班级的学生记录。首次独立通过、订正后通过、新题独立复测通过分别统计；重复题、已使用提示或已查看解析的作答不计为首次独立通过。
 
 首次访问新版页面时，在服务器本机初始化管理员；管理员创建教师账号，学生自行注册并凭加入码入班。内置 67 道训练定义和 107 条规范问答题初始为草稿，教师核查后审核、发布，学生只看到已发布训练，问答参考题也只使用已发布版本。教师可预览草稿；旧版无账号记录仅管理员可读取。训练保留开始时的题目版本及评分规则版本，不随新版本发布而更换。
 
-训练接口及验收案例见 [训练中心说明](docs/training_center.md)，账号、班级与审核操作见 [第二阶段交付记录](docs/stage2_identity_delivery.md)。
+“班级与题库 → 作业与测验”支持教师布置已发布训练题、截止和补交、限次测验，以及实验报告和代码材料；测验结果在结束后公布，交卷后作答和材料锁定。“班级学情”提供学生、题目和章节统计、只读证据、教师评分评语及 CSV 导出。
 
-“班级与题库 → 作业与测验”支持教师布置已发布训练题、截止和补交、限次测验，以及实验报告和代码材料；测验结果在结束后公布，交卷后作答和材料锁定。“班级学情”提供学生、题目和章节统计、只读证据、教师评分评语及 CSV 导出。使用流程与统计口径见 [第三阶段交付记录](docs/stage3_assignments_delivery.md)。
-
-“课程进度”和“错题复习”提供章节资料、阅读标记、知识点作答证据、到期间隔复测与下一步建议。问答与训练往返保留作答和出处；作答问答计入辅助行为，阅读与独立训练证据分开统计。流程、验收及本轮聊天文件恢复限制见 [第四阶段交付记录](docs/stage4_learning_delivery.md)。
+“课程进度”和“错题复习”提供章节资料、阅读标记、知识点作答证据、到期间隔复测与下一步建议。问答与训练往返保留作答和出处；作答问答计入辅助行为，阅读与独立训练证据分开统计。
 
 独立构造题评测：`python scripts/evaluate_learning_diagnosis.py`。结果输出到 `output/learning_evaluation/`，参考轨迹保存在 `tests/fixtures/learning_diagnosis_v1.json`，与内置训练题分开。
 
-三分钟演示见 [训练演示稿](docs/training_demo.md)；`python scripts/replay_learning_demo.py` 可通过训练接口自动回放模拟作答，使用临时数据库。
+`python scripts/replay_learning_demo.py` 可通过训练接口自动回放模拟作答，使用临时数据库。
 
 ## Neo4j 图谱展示
 
@@ -196,7 +192,7 @@ python scripts/graph_visual_with_neo4j.py --subjects C_program operating_systems
 
 ## 题库 embedding 索引
 
-题目辅导模块默认读取：
+`data/` 不纳入版本管理，部署前需单独准备课程资料和题库。向量索引可在题库原文就绪后生成。题目辅导模块默认读取：
 
 - `data/tutoring_question_bank/questions.jsonl`
 - `data/tutoring_question_bank/questions.embedding_index.json`
@@ -243,5 +239,3 @@ WEB_CHAT_STORE_PATH=./tmp/test_web_chats.json conda run -n py311 python -m unitt
 ## 参考文档
 
 - [PROJECT_STRUCTURE.md](./PROJECT_STRUCTURE.md)
-- [产品说明书](./docs/AgenticRAG_Chat_产品说明书_当前版.html)
-- [题目辅导模块报告](./docs/problem_tutoring_module_report.md)

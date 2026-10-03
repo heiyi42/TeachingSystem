@@ -11,8 +11,8 @@ TeachingSystem/
 ├── scripts/               # 启动、数据准备、索引和维护工具
 ├── tests/                 # 回归测试
 ├── docker/                # C 程序与安全实验运行环境
-├── docs/                  # 使用说明、设计方案和交付记录
-├── data/                  # 课程资料、题库和业务数据库
+├── docs/                  # 本地使用说明和设计记录（不纳入 Git）
+├── data/                  # 本地课程资料、题库和业务数据库（不纳入 Git）
 │   └── backups/           # 历史数据与修改前文件备份
 ├── storage/               # 三门课程当前使用的检索索引
 ├── output/                # 文档成品、验收报告和维护记录
@@ -66,4 +66,4 @@ TeachingSystem/
 - `frontend/dist/` 是前端构建产物，后端可能正在使用；`frontend/node_modules/` 是本地依赖。不要在服务运行时当作无用目录删除。
 - `*.egg-info/` 是 Python 安装元数据，已忽略版本控制；当前可编辑安装可能依赖它。
 
-文档分类见 [docs/README.md](docs/README.md)，安装和启动步骤见 [README.md](README.md)。
+安装和启动步骤见 [README.md](README.md)。`data/` 与 `docs/` 仅在本地保存，克隆仓库后需另行准备运行数据。
