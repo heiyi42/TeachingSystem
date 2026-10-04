@@ -8,6 +8,17 @@ from webapp_core.chat_service import ChatService
 
 class ChatDeepSearchTests(unittest.IsolatedAsyncioTestCase):
 
+    def test_response_language_follows_question(self):
+        for question, expected in [
+            ("请解释死锁的四个必要条件。", "zh"),
+            ("Explain the four necessary conditions for deadlock.", "en"),
+            ("请用英文解释死锁。", "en"),
+            ("Explain deadlock，请用中文回答。", "zh"),
+        ]:
+            with self.subTest(question=question):
+                self.assertEqual(ChatService._response_language_from_question(question), expected)
+
+
     async def test_brief_request_keeps_necessary_evidence_without_forced_outline(self):
         service = self._build_service()
         question = "根据课程资料简短解释指针，并给出出处。"

@@ -109,13 +109,14 @@ class ChatService(
         self._event_subscribers_lock = Lock()
 
     @staticmethod
-    def _response_language_from_requested_subjects(
-        requested_subjects: list[str] | None,
-    ) -> str:
-        subjects = list(requested_subjects or [])
-        if subjects == ["operating_systems"]:
+    def _response_language_from_question(question: str) -> str:
+        text = str(question or "")
+        # Course selection must not override the learner's language.
+        if re.search(r"(?:用|使用|以)\s*英文|(?:answer|respond|reply)\s+in\s+English", text, re.I):
             return "en"
-        return "zh"
+        if re.search(r"[\u4e00-\u9fff]", text):
+            return "zh"
+        return "en" if re.search(r"[a-zA-Z]", text) else "zh"
 
     @staticmethod
     def _response_language_instruction(response_language: str) -> str:

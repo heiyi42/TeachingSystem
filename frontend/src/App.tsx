@@ -517,7 +517,7 @@ function Workbench({
                 setWorkspace("chat");
                 setOpenChatMenuId(null);
                 setNavigationOpen(false);
-                store.setActiveChat(chat);
+                if (store.activeChatId !== chat.chat_id) store.setActiveChat(chat);
               }}>{chat.title}</button>
               <div
                 className="chat-menu-wrap"

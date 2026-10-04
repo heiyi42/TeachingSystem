@@ -200,9 +200,7 @@ class ChatStreamingMixin:
             payload.get("problem_tutoring", payload.get("tutoring")),
             False,
         )
-        response_language = self._response_language_from_requested_subjects(
-            requested_subjects
-        )
+        response_language = self._response_language_from_question(question)
         explicit_subjects = list(requested_subjects or [])
         default_timeout = cfg.DEFAULT_TIMEOUT_BY_MODE.get(mode, cfg.INSTANT_QUERY_TIMEOUT_S)
         timeout_s = safe_int(payload.get("timeout"), default_timeout, floor=1)
