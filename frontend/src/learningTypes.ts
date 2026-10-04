@@ -175,6 +175,8 @@ export interface LearningAttempt {
     baseline_submissions: number;
     turns: { question: string; answer?: string }[];
     hypothesis?: string;
+    explanation?: string;
+    focus_code?: string;
     next_step?: string;
   } | null;
   grading_reviews?: GradingReview[];

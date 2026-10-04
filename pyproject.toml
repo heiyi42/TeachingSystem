@@ -23,6 +23,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+assistant = [
+  "scope-time-state @ git+https://github.com/heiyi42/Scope-Time-State.git@c8fb75680b126f258990a9599ae7a91591f9f6ea",
+]
 tools = [
   "neo4j>=6,<7",
   "pypdf>=6.6,<7",

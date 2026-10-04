@@ -26,6 +26,7 @@ import { AnswerMessage } from "./components/AnswerMessage";
 import { MarkdownMessage } from "./components/MarkdownMessage";
 import { ModeDropdown } from "./components/ModeDropdown";
 import { SubjectDropdown } from "./components/SubjectDropdown";
+import { PersonalAssistant } from "./components/PersonalAssistant";
 import { TrainingWorkspace } from "./components/TrainingWorkspace";
 import { IdentityGate } from "./components/IdentityGate";
 import { SchoolWorkspace } from "./components/SchoolWorkspace";
@@ -93,10 +94,10 @@ function Workbench({
   const [navigationError, setNavigationError] = useState("");
   const [openingExercise, setOpeningExercise] = useState(false);
   const [workspace, setWorkspace] = useState<
-    "chat" | "training" | "records" | "school" | "path" | "review"
+    "chat" | "training" | "records" | "school" | "path" | "review" | "assistant"
   >(() => {
     const saved = localStorage.getItem("gm.workspace");
-    return saved === "training" ||
+    return saved === "assistant" || saved === "training" ||
       saved === "records" ||
       saved === "path" ||
       saved === "review" ||
@@ -482,6 +483,7 @@ function Workbench({
         <nav className="workspace-nav" aria-label="工作区">
           <div className="nav-group-label">学习工作区</div>
           {([
+            ["assistant", "个人助理", MessageSquarePlus],
             ["chat", "课程问答", MessageSquare],
             ["path", "课程进度", Route],
             ["training", "训练中心", BookOpen],
@@ -816,6 +818,7 @@ function Workbench({
           />
         </div>
       )}
+      {workspace === "assistant" && <PersonalAssistant key={user.id} userId={user.id} onOpen={setWorkspace} onOpenAttempt={openAttempt} />}
       {workspace === "school" && (
         <div className="training-host">
           <SchoolWorkspace

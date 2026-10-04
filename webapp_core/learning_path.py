@@ -150,9 +150,12 @@ class LearningPathService:
         subject, number = chapter["subject_id"], chapter["number"]
         if subject == "operating_systems":
             folder = MATERIAL_ROOT / "operating_systems_pdf_for_index"
-            manifest = json.loads(
-                (folder / "index_manifest.json").read_text(encoding="utf-8")
-            )
+            try:
+                manifest = json.loads(
+                    (folder / "index_manifest.json").read_text(encoding="utf-8")
+                )
+            except FileNotFoundError:
+                return None
             filename = next(
                 item["chapter_file"]
                 for item in manifest["chapters"]

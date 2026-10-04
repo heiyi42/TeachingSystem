@@ -490,6 +490,8 @@ def create_app(
     )
     questions = chat_service.problem_tutoring_service.load_question_bank()
     register_identity(app, school, learning_service, store, questions)
+    from webapp_core.assistant_routes import assistant_blueprint
+    app.register_blueprint(assistant_blueprint(learning_service, school))
     chat_service.problem_tutoring_service.question_bank_provider = (
         lambda: school.catalog("qa").values()
     )

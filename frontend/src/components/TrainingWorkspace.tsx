@@ -1655,6 +1655,7 @@ function TrainingSession({
                 )}
               {!demoId && !attempt.assignment && <LearningDialogue key={attempt.id}
                 attempt={attempt} busy={busy}
+                onRetest={() => { void start(undefined, attempt.id); }}
                 onRefresh={async () => {
                   const latest = await api.getLearning(attempt.id);
                   if (currentId.current === latest.id) setAttempt(latest);

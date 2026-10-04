@@ -8,7 +8,7 @@ import time
 from langgraph.graph import END, START, StateGraph
 from agenticRAG.workflow_checkpoint import checkpoint_run, invoke_workflow
 
-from .learning_service import LearningConflict
+from .learning_service import ERROR_LABELS, LearningConflict
 from .learning_memory import learning_memories
 from .learning_path import LearningPathService
 
@@ -94,6 +94,17 @@ class LearningDialogueService:
                 "process_predictions": (source.get("walkthrough") or {}).get(
                     "steps", []
                 )[-6:],
+                "focus_options": {
+                    tag: ERROR_LABELS.get(tag, tag)
+                    for item in self.learning.catalog.values()
+                    if item["subject_id"] == context_subject
+                    and item["kind"] == self.learning._exercise(source)["kind"]
+                    and item.get("family_id", item["algorithm"])
+                    == self.learning._exercise(source).get(
+                        "family_id", self.learning._exercise(source)["algorithm"]
+                    )
+                    for tag in item["training_tags"]
+                },
                 "final_round": len(turns) >= 3,
             }
             prompt = (
@@ -104,7 +115,13 @@ class LearningDialogueService:
                 "利用 prior_learning 延续先前互动，核对新证据，不要把历史假设当成事实或固定标签。不要给完整答案，不宣称学生已掌握，不把表达流畅当成通过。"
                 "只返回JSON，包含 hypothesis（待验证假设）、question（一个追问）、"
                 "next_step（回到当前题应检查的具体步骤），每项1至600字。"
-                "final_round为true时停止追问，question写请返回练习完成核验。"
+                "另外返回 explanation（不超过600字的简短对比讲解，使用不同于原题的小例子）、"
+                "focus_code（从focus_options选择最有证据支持的一项，无证据则空字符串）、"
+                "ready_to_verify（布尔值）。首次必须追问，explanation和focus_code为空，"
+                "ready_to_verify为false。学生回答后，结合回答修正假设并给出讲解；"
+                "信息足够或学生表示不确定时可设ready_to_verify为true，转入订正，"
+                "不要把假设称为已确认事实。final_round为true时停止追问，"
+                "给出简短讲解，question写请返回练习完成核验。"
             )
             return {**state, "context": context, "prompt": prompt}
 
@@ -140,9 +157,24 @@ class LearningDialogueService:
                 for k in ("hypothesis", "question", "next_step")
             ):
                 raise RuntimeError("诊断响应无效")
+            explanation = result.get("explanation", "")
+            focus = result.get("focus_code", "")
+            ready = result.get("ready_to_verify", False)
+            if (
+                not isinstance(explanation, str) or len(explanation) > 600
+                or not isinstance(focus, str)
+                or (focus and focus not in state["context"]["focus_options"])
+                or type(ready) is not bool
+                or (ready and not explanation.strip())
+            ):
+                raise RuntimeError("诊断响应无效")
+            # A model cannot skip the student response or grade understanding.
+            if state["action"] == "answer":
+                session["explanation"] = explanation.strip()
+                session["focus_code"] = focus
             session["hypothesis"] = result["hypothesis"]
             session["next_step"] = result["next_step"]
-            if len(turns) >= 3:
+            if len(turns) >= 3 or (state["action"] == "answer" and ready):
                 session["status"] = "verifying"
             else:
                 turns.append({"question": result["question"]})

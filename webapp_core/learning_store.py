@@ -64,6 +64,8 @@ class LearningStore:
         connection.execute(
             "CREATE TABLE IF NOT EXISTS ai_study_plans (owner_id TEXT NOT NULL, subject_id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(owner_id,subject_id))"
         )
+        from .assistant_store import schema
+        schema(connection)
         connection.commit()
         return connection
 
@@ -345,6 +347,15 @@ class LearningStore:
                 (json.dumps(state, ensure_ascii=False), attempt_id),
             )
             self._event(connection, attempt_id, kind, event)
+            if kind == "submitted" and state.get("owner_id") and not state.get("assignment_id"):
+                from .assistant_store import enqueue
+                last = state["submissions"][-1]
+                first = state["submissions"][0]
+                enqueue(connection, state["owner_id"], f"practice:{attempt_id}:{len(state['submissions'])}",
+                        json.dumps({"来源": "系统核验的课外练习", "题目": state["exercise_id"],
+                            "结果": state["status"], "首错": state.get("first_error"),
+                            "首次独立通过": bool(first["evaluation"]["passed"] and first["unassisted"]),
+                            "本次提交通过": bool(last["evaluation"]["passed"])}, ensure_ascii=False))
             return state
 
     def freeze_legacy(self, exercises):

@@ -167,7 +167,9 @@ class LearningService:
     ) -> dict[str, Any] | None:
         seen = {item["exercise_id"] for item in existing}
         exercise = self._exercise(state)
-        error_code = (state["first_error"] or {}).get("error_code")
+        error_code = (state.get("dialogue") or {}).get("focus_code") or (
+            state["first_error"] or {}
+        ).get("error_code")
         candidates = [
             item
             for item in self.catalog.values()
@@ -187,7 +189,7 @@ class LearningService:
         if not candidates:
             return None
         target = candidates[0]
-        focus = ERROR_LABELS.get(error_code)
+        focus = ERROR_LABELS.get(error_code) if error_code in target["training_tags"] else None
         reason = (
             f"更换题目参数，检查{focus}是否仍然出现。"
             if focus

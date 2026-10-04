@@ -1,3 +1,5 @@
+import type { ExamOverview, ExamPlan } from "./components/ExamPlanPanel";
+import type { AssistantView } from "./components/PersonalAssistant";
 import type { ChatSession, StreamEvent } from "./types";
 import type {
   GradingReview,
@@ -177,6 +179,16 @@ export function createLearningApi(demoId = "", classId = "") {
 }
 
 export const api = {
+  examPlans: () => apiJson<ExamOverview>("/api/assistant/exam-plans"),
+  examDraft: (data: { subject_id: string; exam_date: string; chapters: string[]; minutes: number }) => apiJson<ExamPlan>("/api/assistant/exam-plans", { method: "POST", body: JSON.stringify(data) }),
+  examAdopt: (id: string, revision: number) => apiJson<ExamPlan>(`/api/assistant/exam-plans/${id}/adopt`, { method: "POST", body: JSON.stringify({revision}) }),
+  examToday: (id: string, revision: number, minutes: number) => apiJson<ExamPlan>(`/api/assistant/exam-plans/${id}/today`, { method: "PUT", body: JSON.stringify({revision, minutes}) }),
+  examStartTask: (id: string, task: string) => apiJson<LearningAttempt>(`/api/assistant/exam-plans/${id}/tasks/${task}/start`, { method: "POST", body: "{}" }),
+  assistant: () => apiJson<AssistantView>("/api/assistant"),
+  assistantMessage: (content: string, request_id: string) => apiJson<AssistantView>("/api/assistant/messages", { method: "POST", body: JSON.stringify({content, request_id}) }),
+  assistantMemory: (enabled: boolean) => apiJson<AssistantView>("/api/assistant/memory", { method: "PUT", body: JSON.stringify({enabled}) }),
+  assistantForget: (id?: string) => apiJson<AssistantView>(`/api/assistant/memory${id ? `/${encodeURIComponent(id)}` : ""}`, { method: "DELETE", body: "{}" }),
+  assistantMemoryRetry: () => apiJson<AssistantView>("/api/assistant/memory/retry", { method: "POST", body: "{}" }),
   cancelChatRun: (chatId: string, runId: string, executionId: string) =>
     apiJson(`/api/chats/${chatId}/runs/${runId}/cancel`, {
       method: "POST", body: JSON.stringify({ execution_id: executionId }),
