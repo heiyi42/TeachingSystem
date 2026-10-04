@@ -23,20 +23,41 @@ TeachingSystem/
 
 `.codex/` 保存本项目的 Codex 运行配置。`.vscode/` 属于本地编辑器配置。
 
-## 后端模块定位
+## 业务目录
 
-| 位置 | 职责 |
-| --- | --- |
-| `webapp_core/chat_*.py` | 问答入口、路由、Auto 编排、检索适配与流式输出 |
-| `webapp_core/workflow_runs.py` | 执行状态、恢复、取消、并发保护和过期记录清理 |
-| `agenticRAG/workflow_checkpoint.py` | LangGraph 持久化检查点 |
-| `webapp_core/learning_dialogue.py`、`learning_plan.py`、`learning_workflow.py` | 互动诊断、个性化计划与学习工作流 |
-| `webapp_core/learning_store.py`、`learning_service.py`、`learning_routes.py` | 学习记录、训练业务和接口 |
-| `webapp_core/learning_c*.py`、`learning_program.py` | C 语言训练和程序评测 |
-| `webapp_core/learning_os_foundations.py`、`learning_banker.py`、`learning_pv.py`、`learning_readers_writers.py` | 操作系统训练 |
-| `webapp_core/learning_security*.py` | 安全训练与实验 |
-| `webapp_core/learning_curriculum.py`、`learning_path.py`、`learning_followup.py`、`learning_memory.py` | 课程关系、学习路径、推荐效果与学习记忆 |
-| `webapp_core/school_*.py`、`task_service.py`、`grading_review.py` | 身份、班级、作业测验与评测复核 |
+后端、前端组件和测试按业务归类。定位一个功能时，先进入对应业务目录，再找路由、服务、组件或测试；新增代码放入已有业务目录。
+
+| 业务 | 后端 `webapp_core/` | 前端 `frontend/src/components/` | 测试 `tests/` |
+| --- | --- | --- | --- |
+| 问答、检索、代码分析、知识图谱 | `chat/` | `chat/` | `chat/` |
+| 诊断、计划、训练、学习记录 | `learning/` | `learning/` | `learning/` |
+| 个人助理、考试计划、助理记忆 | `assistant/` | `assistant/` | `assistant/` |
+| 身份、班级、作业、备课、评测复核 | `school/` | `school/`、`auth/` | `school/` |
+| 异步执行、会话存储、工作流状态 | `runtime/` | — | `runtime/` |
+| 检索与回答底层能力 | `agenticRAG/`（项目根目录） | — | `agentic/` |
+| 多业务共用的展示与交互 | — | `shared/` | — |
+
+`webapp_core/config.py` 保留公共配置；`chat/auto_runtime.py` 是现有聊天与学习功能共用的模型客户端。前端 `shared/` 只放跨业务组件，目前包括 Markdown 展示和放弃修改确认。各业务的 API 和数据类型仍在 `frontend/src/` 原有位置。
+
+保留原文件名，避免目录调整同时混入命名和业务逻辑变更。Python 使用完整包路径导入，前端使用直接相对路径导入，不保留旧路径转发模块。
+
+## 测试入口
+
+从项目根目录运行。`tests/fixtures/` 统一保存测试数据，各业务目录只放对应测试。
+
+```bash
+# 全部回归测试，使用独立聊天记录文件
+WEB_CHAT_STORE_PATH=./tmp/test_web_chats.json python -m unittest discover -s tests -t .
+
+# 单个业务目录
+WEB_CHAT_STORE_PATH=./tmp/test_web_chats.json python -m unittest discover -s tests/learning -t .
+
+# 单个测试模块
+python -m unittest tests.chat.test_graph_service
+
+# 前端类型检查和生产构建
+npm --prefix frontend run build
+```
 
 ## 工具入口
 

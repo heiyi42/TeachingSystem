@@ -17,5 +17,5 @@ docker build -t teaching-c-runner:1 docker/c-runner
 运行 Docker 集成验收（测试数据与正式聊天隔离）：
 
 ```sh
-TEST_C_PROGRAM_DOCKER=1 WEB_CHAT_STORE_PATH=./tmp/c_runner_test_chats.json python -m unittest tests.test_learning_expansion tests.test_learning_coverage
+TEST_C_PROGRAM_DOCKER=1 WEB_CHAT_STORE_PATH=./tmp/c_runner_test_chats.json python -m unittest tests.learning.test_learning_expansion tests.learning.test_learning_coverage
 ```

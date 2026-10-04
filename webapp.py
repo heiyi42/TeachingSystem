@@ -18,17 +18,17 @@ from flask import (
 from agenticRAG.cli_utils import build_memory_factory
 from agenticRAG.short_memory import shutdown_shared_conversation_memories
 from webapp_core import config as cfg
-from webapp_core.async_runner import async_runner, run_async, submit_async
-from webapp_core.chat_service import ChatService
-from webapp_core.workflow_runs import WorkflowRuns, WorkflowConflict
-from webapp_core.graph_service import Neo4jGraphService
-from webapp_core.learning_routes import learning_blueprint
-from webapp_core.learning_service import LearningService
-from webapp_core.learning_path import LearningPathService
-from webapp_core.learning_store import LearningStore
-from webapp_core.school_store import SchoolStore
-from webapp_core.school_routes import register_identity
-from webapp_core.session_store import SessionStore
+from webapp_core.runtime.async_runner import async_runner, run_async, submit_async
+from webapp_core.chat.chat_service import ChatService
+from webapp_core.runtime.workflow_runs import WorkflowRuns, WorkflowConflict
+from webapp_core.chat.graph_service import Neo4jGraphService
+from webapp_core.learning.learning_routes import learning_blueprint
+from webapp_core.learning.learning_service import LearningService
+from webapp_core.learning.learning_path import LearningPathService
+from webapp_core.learning.learning_store import LearningStore
+from webapp_core.school.school_store import SchoolStore
+from webapp_core.school.school_routes import register_identity
+from webapp_core.runtime.session_store import SessionStore
 
 _STORE_EXT_KEY = "agenticrag.store"
 _CHAT_SERVICE_EXT_KEY = "agenticrag.chat_service"
@@ -490,7 +490,7 @@ def create_app(
     )
     questions = chat_service.problem_tutoring_service.load_question_bank()
     register_identity(app, school, learning_service, store, questions)
-    from webapp_core.assistant_routes import assistant_blueprint
+    from webapp_core.assistant.assistant_routes import assistant_blueprint
     app.register_blueprint(assistant_blueprint(learning_service, school))
     chat_service.problem_tutoring_service.question_bank_provider = (
         lambda: school.catalog("qa").values()

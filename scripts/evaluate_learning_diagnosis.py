@@ -17,10 +17,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from webapp_core.learning_exercises import EXERCISES  # noqa: E402
-from webapp_core.learning_service import LearningService  # noqa: E402
-from webapp_core.learning_store import LearningStore  # noqa: E402
-from webapp_core.problem_tutoring_service import ProblemTutoringService  # noqa: E402
+from webapp_core.learning.learning_exercises import EXERCISES  # noqa: E402
+from webapp_core.learning.learning_service import LearningService  # noqa: E402
+from webapp_core.learning.learning_store import LearningStore  # noqa: E402
+from webapp_core.chat.problem_tutoring_service import ProblemTutoringService  # noqa: E402
 
 
 DEFAULT_FIXTURE = ROOT / "tests/fixtures/learning_diagnosis_v1.json"
@@ -157,10 +157,10 @@ def run_evaluation(fixture: Path) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="learning-eval-") as temporary:
         service = LearningService(LearningStore(Path(temporary) / "records.sqlite3"), ProblemTutoringService())
         results = [evaluate_case(service, case) for case in cases]
-    sources = [fixture, Path(__file__), ROOT / "webapp_core/learning_exercises.py",
-               ROOT / "webapp_core/learning_service.py", ROOT / "webapp_core/learning_security.py",
-               ROOT / "webapp_core/learning_c.py", ROOT / "webapp_core/learning_banker.py",
-               ROOT / "webapp_core/problem_tutoring_service.py"]
+    sources = [fixture, Path(__file__), ROOT / "webapp_core/learning/learning_exercises.py",
+               ROOT / "webapp_core/learning/learning_service.py", ROOT / "webapp_core/learning/learning_security.py",
+               ROOT / "webapp_core/learning/learning_c.py", ROOT / "webapp_core/learning/learning_banker.py",
+               ROOT / "webapp_core/chat/problem_tutoring_service.py"]
     return {
         "dataset": dataset["name"], "provenance": dataset["provenance"],
         "fixture": str(fixture.relative_to(ROOT) if fixture.is_relative_to(ROOT) else fixture),

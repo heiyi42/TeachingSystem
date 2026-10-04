@@ -3,7 +3,6 @@
 import argparse
 import asyncio
 from contextlib import closing, redirect_stdout, redirect_stderr
-from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -41,8 +40,8 @@ def main():
             )
         )
         return 2 if missing else 0
-    from webapp_core.assistant_store import AssistantStore, enqueue
-    from webapp_core.assistant_memory import (
+    from webapp_core.assistant.assistant_store import AssistantStore, enqueue
+    from webapp_core.assistant.assistant_memory import (
         STSMemory,
         ModelProvider,
         retrieve,
@@ -68,24 +67,54 @@ def main():
         if not store.publish(job, snapshot):
             raise RuntimeError("Publication failed")
         # New retrieval call with no chat history simulates a new conversation.
+        class CheckedEmbeddings(Embeddings):
+            succeeded = False
+
+            def embed(self, texts):
+                import math
+
+                vectors = super().embed(texts)
+                if len(vectors) != len(texts) or any(
+                    len(vector) != self.dimension
+                    or not all(math.isfinite(value) for value in vector)
+                    or not any(vector)
+                    for vector in vectors
+                ):
+                    raise ValueError("Invalid embedding response")
+                self.succeeded = True
+                return vectors
+
+        embeddings = CheckedEmbeddings()
         evidence = await asyncio.to_thread(
             retrieve,
             store.view("synthetic-user")["snapshot"],
             "这周每天复习多少分钟？",
-            Embeddings(),
+            embeddings,
+        )
+        vector_ok = embeddings.succeeded and all(
+            len(snapshot.get("vectors", {}).get(key, [])) == embeddings.dimension
+            for key in snapshot.get("claims", {})
         )
         answer = await ModelProvider().generate(
-            '仅依据下面的个人记忆，返回JSON {"daily_minutes":整数}。问题：这周每天复习多少分钟？记忆：'
+            '仅依据下面的个人记忆，返回JSON {"daily_minutes":整数,"next_week_minutes":整数}。问题：这周和下周每天分别复习多少分钟？记忆：'
             + json.dumps(evidence, ensure_ascii=False)
         )
-        recall_ok = json.loads(answer).get("daily_minutes") == 25
+        recalled = json.loads(answer)
+        recall_ok = recalled.get("daily_minutes") == 25
+        temporary_ok = recalled.get("next_week_minutes") == 50
         store.settings("synthetic-user", forget=True)
         deletion_ok = not store.view("synthetic-user")[
             "snapshot"
         ] and not store.publish(job, snapshot)
         return {
-            "live_test": "passed" if recall_ok and deletion_ok else "failed",
+            "live_test": (
+                "passed"
+                if recall_ok and temporary_ok and vector_ok and deletion_ok
+                else "failed"
+            ),
             "recall_current_constraint": recall_ok,
+            "temporary_constraint_expires": temporary_ok,
+            "live_embeddings": vector_ok,
             "deletion_blocks_old_job": deletion_ok,
             "claims": len(snapshot.get("claims", {})),
         }

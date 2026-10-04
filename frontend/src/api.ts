@@ -1,5 +1,5 @@
-import type { ExamOverview, ExamPlan } from "./components/ExamPlanPanel";
-import type { AssistantView } from "./components/PersonalAssistant";
+import type { ExamOverview, ExamPlan } from "./components/assistant/ExamPlanPanel";
+import type { AssistantView } from "./components/assistant/PersonalAssistant";
 import type { ChatSession, StreamEvent } from "./types";
 import type {
   GradingReview,
@@ -27,6 +27,8 @@ import type {
   SchoolTask,
   TaskDetail,
   ClassReport,
+  LessonPlan,
+  LessonEffects,
 } from "./schoolTypes";
 
 async function apiJson<T>(url: string, options: RequestInit = {}): Promise<T> {
@@ -330,8 +332,20 @@ export const api = {
       `/api/school/tasks/${id}/students/${studentId}/review`,
       { method: "POST", body: JSON.stringify({ comment, score }) },
     ),
-  classReport: (classId: string) =>
-    apiJson<ClassReport>(`/api/school/classes/${classId}/report`),
+  lessonPlans: (classId: string) =>
+    apiJson<{ chapters: Array<{ id: string; title: string }>; plans: LessonPlan[] }>(`/api/school/classes/${classId}/lesson-plans`),
+  generateLessonPlan: (classId: string, chapter_id: string, minutes: number) =>
+    apiJson<LessonPlan>(`/api/school/classes/${classId}/lesson-plans/generate`, {
+      method: "POST", body: JSON.stringify({ chapter_id, minutes }),
+    }),
+  saveLessonPlan: (plan: LessonPlan) =>
+    apiJson<LessonPlan>(`/api/school/classes/${plan.class_id}/lesson-plans${plan.id ? `/${plan.id}` : ""}`, {
+      method: plan.id ? "PUT" : "POST", body: JSON.stringify({ ...plan, confirmed: true }),
+    }),
+  lessonEffects: (classId: string, planId: string) =>
+    apiJson<LessonEffects>(`/api/school/classes/${classId}/lesson-plans/${planId}/effects`),
+  classReport: (classId: string, chapterId = "") =>
+    apiJson<ClassReport>(`/api/school/classes/${classId}/report${chapterId ? `?chapter_id=${encodeURIComponent(chapterId)}` : ""}`),
   gradingReviews: () =>
     apiJson<{
       items: Array<

@@ -15,10 +15,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from webapp_core.learning_routes import learning_blueprint  # noqa: E402
-from webapp_core.learning_service import LearningService  # noqa: E402
-from webapp_core.learning_store import LearningStore  # noqa: E402
-from webapp_core.problem_tutoring_service import ProblemTutoringService  # noqa: E402
+from webapp_core.learning.learning_routes import learning_blueprint  # noqa: E402
+from webapp_core.learning.learning_service import LearningService  # noqa: E402
+from webapp_core.learning.learning_store import LearningStore  # noqa: E402
+from webapp_core.chat.problem_tutoring_service import ProblemTutoringService  # noqa: E402
 
 
 def replay() -> dict:

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from webapp_core.problem_tutoring_service import ProblemTutoringService  # noqa: E402
+from webapp_core.chat.problem_tutoring_service import ProblemTutoringService  # noqa: E402
 
 
 DEFAULT_QUESTION_BANK_PATH = Path("data/tutoring_question_bank/questions.jsonl")

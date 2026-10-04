@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from webapp_core.learning_roadshow import CASES, roadshow
+from webapp_core.learning.learning_roadshow import CASES, roadshow
 
 
 def evaluate():

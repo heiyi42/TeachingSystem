@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv
-from webapp_core.workflow_runs import WorkflowRuns
+from webapp_core.runtime.workflow_runs import WorkflowRuns
 
 
 def main():

@@ -27,7 +27,7 @@ from agenticRAG.agentic_config import (  # noqa: E402
     EMBEDDING_DIMENSION,
     EMBEDDING_MODEL,
 )
-from webapp_core.problem_tutoring_service import ProblemTutoringService  # noqa: E402
+from webapp_core.chat.problem_tutoring_service import ProblemTutoringService  # noqa: E402
 
 
 def file_hash(path: Path) -> str | None:

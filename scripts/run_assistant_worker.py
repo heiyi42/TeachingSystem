@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
-from webapp_core.assistant_store import AssistantStore
+from webapp_core.assistant.assistant_store import AssistantStore
 
 
 def main():
@@ -32,7 +32,7 @@ def main():
         failed = False
         if job:
             try:
-                from webapp_core.assistant_memory import STSMemory
+                from webapp_core.assistant.assistant_memory import STSMemory
 
                 # Upstream benchmark extractors print prompts and responses.
                 # The dedicated worker suppresses these private-content logs.

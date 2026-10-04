@@ -1,3 +1,4 @@
+import { useDiscardChanges } from "./components/shared/useDiscardChanges";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -9,6 +10,11 @@ import {
   History,
   RotateCcw,
   GraduationCap,
+  BarChart3,
+  ClipboardList,
+  NotebookPen,
+  Settings,
+  ListChecks,
   Network,
   ArrowUpRight,
   Cpu,
@@ -22,15 +28,15 @@ import {
   Trash2,
 } from "lucide-react";
 import { api, streamChatMessage } from "./api";
-import { AnswerMessage } from "./components/AnswerMessage";
-import { MarkdownMessage } from "./components/MarkdownMessage";
-import { ModeDropdown } from "./components/ModeDropdown";
-import { SubjectDropdown } from "./components/SubjectDropdown";
-import { PersonalAssistant } from "./components/PersonalAssistant";
-import { TrainingWorkspace } from "./components/TrainingWorkspace";
-import { IdentityGate } from "./components/IdentityGate";
-import { SchoolWorkspace } from "./components/SchoolWorkspace";
-import { LearningPathWorkspace } from "./components/LearningPathWorkspace";
+import { AnswerMessage } from "./components/chat/AnswerMessage";
+import { MarkdownMessage } from "./components/shared/MarkdownMessage";
+import { ModeDropdown } from "./components/chat/ModeDropdown";
+import { SubjectDropdown } from "./components/chat/SubjectDropdown";
+import { PersonalAssistant } from "./components/assistant/PersonalAssistant";
+import { TrainingWorkspace } from "./components/learning/TrainingWorkspace";
+import { IdentityGate } from "./components/auth/IdentityGate";
+import { SchoolWorkspace, type SchoolView } from "./components/school/SchoolWorkspace";
+import { LearningPathWorkspace } from "./components/learning/LearningPathWorkspace";
 import type { LearningQuestionContext, LearningSubject } from "./learningTypes";
 import type { SchoolUser } from "./schoolTypes";
 import { useWorkbenchStore } from "./store";
@@ -105,7 +111,28 @@ function Workbench({
       ? saved
       : "chat";
   });
+  const [schoolView, setSchoolView] = useState<SchoolView>(() => {
+    const saved = sessionStorage.getItem(`school-view:${user.id}`);
+    if (saved === "classes" || saved === "tasks" || saved === "account") return saved;
+    if (user.role !== "student" && (saved === "reports" || saved === "preparation" || saved === "content" || saved === "grading")) return saved;
+    return "tasks";
+  });
+  useEffect(() => { sessionStorage.setItem(`school-view:${user.id}`, schoolView); }, [schoolView, user.id]);
+  const { confirmDiscard, discardDialog } = useDiscardChanges();
+  const [assistantDirty, setAssistantDirty] = useState(false);
+  const [schoolDirty, setSchoolDirty] = useState(false);
+  const teacher = user.role !== "student";
   const store = useWorkbenchStore();
+  useEffect(() => {
+    const key = `learning-subject:${user.id}`;
+    const saved = sessionStorage.getItem(key);
+    useWorkbenchStore.getState().setPreferredSubject(
+      saved === "C_program" || saved === "operating_systems" || saved === "cybersec_lab" ? saved : "C_program",
+    );
+    return useWorkbenchStore.subscribe((next, previous) => {
+      if (next.preferredSubject !== previous.preferredSubject) sessionStorage.setItem(key, next.preferredSubject);
+    });
+  }, [user.id]);
   const matchQuestion =
     draft.trim() ||
     [...store.activeMessages].reverse().find((m) => m.role === "user")
@@ -142,6 +169,8 @@ function Workbench({
       ? trainingMatches.data?.matches || []
       : [];
 
+  const [reviewReturnId, setReviewReturnId] = useState("");
+
   function openAttempt(id: string) {
     setTaskAttempt({ id, taskId: "", nonce: Date.now() });
     setWorkspace("training");
@@ -154,7 +183,7 @@ function Workbench({
   ) {
     store.setPreferredSubject(subject);
     setQuestionContext(context || null);
-    setDraft(prompt);
+    if (!context || context.attempt_id !== questionContext?.attempt_id || !draft.trim()) setDraft(prompt);
     setWorkspace("chat");
   }
 
@@ -462,6 +491,7 @@ function Workbench({
 
   return (
     <div className={`app-shell${navigationOpen ? " navigation-open" : ""}`}>
+      {discardDialog}
       <div className="mobile-topbar">
         <button ref={navigationToggle} className="ghost-action" aria-label={navigationOpen ? "收起导航" : "展开导航"} aria-expanded={navigationOpen} aria-controls="workbench-navigation" onClick={() => setNavigationOpen(!navigationOpen)}>
           {navigationOpen ? <X size={18} /> : <Menu size={18} />}
@@ -481,25 +511,41 @@ function Workbench({
           </div>
         </div>
         <nav className="workspace-nav" aria-label="工作区">
-          <div className="nav-group-label">学习工作区</div>
+          <div className="nav-group-label">{teacher ? "教学工作区" : "学习工作区"}</div>
           {([
-            ["assistant", "个人助理", MessageSquarePlus],
+            ["assistant", teacher ? "老师助理" : "个人助理", MessageSquarePlus],
+            ...(teacher ? [
+              ["reports", "班级学情", BarChart3],
+              ["preparation", "备课安排", NotebookPen],
+              ["tasks", "作业与测验", ClipboardList],
+              ["classes", "班级管理", GraduationCap],
+            ] as const : [
+              ["path", "课程进度", Route],
+              ["tasks", "我的作业", ClipboardList],
+              ["training", "训练中心", BookOpen],
+              ["review", "错题复习", RotateCcw],
+              ["records", "学习记录", History],
+              ["classes", "我的班级", GraduationCap],
+            ] as const),
             ["chat", "课程问答", MessageSquare],
-            ["path", "课程进度", Route],
-            ["training", "训练中心", BookOpen],
-            ["review", "错题复习", RotateCcw],
-            ["records", "学习记录", History],
-            ["school", "班级与题库", GraduationCap],
-          ] as const).map(([id, label, Icon]) => (
-            <button key={id} className={workspace === id ? "active" : ""} aria-current={workspace === id ? "page" : undefined} onClick={() => {
-              setWorkspace(id);
-              setNavigationOpen(false);
-              if (navigationOpen) navigationToggle.current?.focus();
-            }}>
-              <Icon size={18} aria-hidden="true" />
-              {label}
-            </button>
-          ))}
+            ...(teacher ? [
+              ["content", "题库审核", BookOpen],
+              ["grading", "评测复核", ListChecks],
+            ] as const : []),
+          ] as const).map(([id, label, Icon]) => {
+            const school = id === "reports" || id === "preparation" || id === "tasks" || id === "classes" || id === "content" || id === "grading";
+            const active = school ? workspace === "school" && schoolView === id : workspace === id;
+            return <div key={id}>
+              {id === "content" && <div className="nav-group-label nav-management">教学管理</div>}
+              <button className={active ? "active" : ""} aria-current={active ? "page" : undefined} onClick={() => {
+                if (school && id !== schoolView && schoolDirty) { confirmDiscard(() => { setSchoolView(id); setReturnTask(""); setWorkspace("school"); }); return; }
+                if (school) { setSchoolView(id); setReturnTask(""); setWorkspace("school"); }
+                else setWorkspace(id);
+                setNavigationOpen(false);
+                if (navigationOpen) navigationToggle.current?.focus();
+              }}><Icon size={18} aria-hidden="true" />{label}</button>
+            </div>;
+          })}
         </nav>
         <div className="sidebar-conversations" hidden={workspace !== "chat"}>
           <div className="conversation-heading">
@@ -579,6 +625,7 @@ function Workbench({
         </div>
         </div>
         <div className="identity-status">
+          <button className="account-link" aria-current={workspace === "school" && schoolView === "account" ? "page" : undefined} onClick={() => { if (schoolDirty && schoolView !== "account") { confirmDiscard(() => { setSchoolView("account"); setWorkspace("school"); }); return; } setSchoolView("account"); setWorkspace("school"); }}><Settings size={16} />账号设置</button>
           {user.name} ·{" "}
           {user.role === "admin"
             ? "管理员"
@@ -587,13 +634,11 @@ function Workbench({
               : "学生"}
           <button
             className="training-link"
-            onClick={() =>
-              onLogout().catch((reason) =>
-                window.alert(
-                  reason instanceof Error ? reason.message : String(reason),
-                ),
-              )
-            }
+            onClick={() => {
+              const logout = () => { void onLogout().catch(reason => window.alert(reason instanceof Error ? reason.message : String(reason))); };
+              if (schoolDirty || assistantDirty) confirmDiscard(logout);
+              else logout();
+            }}
           >
             退出登录
           </button>
@@ -605,7 +650,6 @@ function Workbench({
           <div className="workspace-title-block">
             <div>
               <h1 className="workspace-title">课程问答</h1>
-              <p className="workspace-description">围绕课程概念、习题和代码展开讨论</p>
             </div>
             <div className="toolbar-controls">
               <ModeDropdown value={store.preferredMode} onChange={updateMode} />
@@ -624,10 +668,7 @@ function Workbench({
           {questionContext && (
             <div className="question-context">
               <strong>来自训练：{questionContext.title}</strong>
-              <p>
-                资料：{questionContext.source} · 第 {questionContext.start_line}
-                —{questionContext.end_line} 行
-              </p>
+              <details><summary>查看资料出处</summary><p>{questionContext.source} · 第 {questionContext.start_line}—{questionContext.end_line} 行</p></details>
               <div className="path-actions">
                 <button
                   className="training-link"
@@ -662,12 +703,12 @@ function Workbench({
                 </article>
               ),
             )
+          ) : questionContext ? (
+            <p className="training-muted">可以描述卡住的步骤，或说明你希望检查的计算方法。</p>
           ) : (
             <div className="empty-state">
-              <div className="welcome-symbol"><Network size={38} strokeWidth={1.4} /></div>
-              <p className="welcome-eyebrow">图思助教 · 课程问答</p>
-              <h2>今天想学哪门课？</h2>
-              <p className="welcome-description">从概念理解到过程推演，在这里展开你的学习。</p>
+              <h2>从一个具体问题开始</h2>
+              <p className="welcome-description">选择上方课程，或用下面的问题开始讨论。</p>
               <div className="course-starters">
                 {([
                   ["C_program", "C 语言", "语法基础、指针与程序分析", "如何理解 C 语言中指针与数组的区别？", Braces],
@@ -687,7 +728,7 @@ function Workbench({
                   </button>
                 ))}
               </div>
-              <p className="welcome-footnote">也可以直接输入问题，由助教自动识别课程</p>
+
             </div>
           )}
         </section>
@@ -787,8 +828,15 @@ function Workbench({
           userId={user.id}
           initialAttemptId={taskAttempt?.id}
           requestNonce={taskAttempt?.nonce}
+          reviewReturnId={reviewReturnId}
+          onBackToReview={() => {
+            void queryClient.invalidateQueries({ queryKey: ["learning-path", user.id] });
+            setWorkspace("review");
+          }}
           onBackToTask={(taskId) => {
             setReturnTask(taskId);
+            void queryClient.invalidateQueries({ queryKey: ["school-tasks"] });
+            setSchoolView("tasks");
             setWorkspace("school");
           }}
           section={workspace === "records" ? "records" : "training"}
@@ -812,26 +860,28 @@ function Workbench({
           <LearningPathWorkspace
             userId={user.id}
             section={workspace}
-            initialSubject={store.preferredSubject}
-            onOpenAttempt={openAttempt}
+            onOpenAttempt={(id) => {
+              setReviewReturnId(workspace === "review" ? id : "");
+              openAttempt(id);
+            }}
             onQuestion={openQuestion}
           />
         </div>
       )}
-      {workspace === "assistant" && <PersonalAssistant key={user.id} userId={user.id} onOpen={setWorkspace} onOpenAttempt={openAttempt} />}
-      {workspace === "school" && (
-        <div className="training-host">
+      <div className="training-host" hidden={workspace !== "assistant"}><PersonalAssistant onDirtyChange={setAssistantDirty} active={workspace === "assistant"} key={user.id} userId={user.id} user={user} onOpen={(next) => { if (next === "school") { setSchoolView("tasks"); setReturnTask(""); } setWorkspace(next); }} onOpenAttempt={openAttempt} /></div>
+      <div className="training-host" hidden={workspace !== "school"}>
           <SchoolWorkspace
             user={user}
+            view={schoolView}
+            onDirtyChange={setSchoolDirty}
             initialTaskId={returnTask || undefined}
             onOpenAttempt={(id, taskId) => {
               setTaskAttempt({ id, taskId, nonce: Date.now() });
-              setReturnTask(taskId);
+              setReturnTask("");
               setWorkspace("training");
             }}
           />
-        </div>
-      )}
+      </div>
     </div>
   );
 }
