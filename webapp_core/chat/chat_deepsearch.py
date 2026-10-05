@@ -9,14 +9,12 @@ class ChatDeepSearchMixin:
         *,
         user_question: str,
         question: str,
-        thread_id: str,
         timeout_s: int,
         subject_ids: list[str],
         response_language: str = "zh",
         emit_text: Callable[[str], None] | None = None,
         workflow_stage_callback: Callable[[str, dict[str, Any]], Any] | None = None,
     ) -> dict[str, Any]:
-        del thread_id
         normalized_subject_ids = (
             [
                 subject_id
@@ -57,22 +55,24 @@ class ChatDeepSearchMixin:
         requested_subjects: list[str] | None = None,
         user_question: str,
         augmented_question: str,
-        thread_id: str,
         timeout_s: int,
         response_language: str = "zh",
         emit_text: Callable[[str], None] | None = None,
         workflow_stage_callback: Callable[[str, dict[str, Any]], Any] | None = None,
     ) -> dict[str, Any]:
         if mode == "deepsearch":
-            deep_subjects = [
-                subject_id
-                for subject_id in (requested_subjects or [])
-                if subject_id in self.subject_catalog
-            ] or list((subject_route or {}).get("requested_subjects", [])) or ["C_program"]
+            deep_subjects = (
+                [
+                    subject_id
+                    for subject_id in (requested_subjects or [])
+                    if subject_id in self.subject_catalog
+                ]
+                or list((subject_route or {}).get("requested_subjects", []))
+                or ["C_program"]
+            )
             return await self._run_multi_subject_deep_stream(
                 user_question=user_question,
                 question=augmented_question,
-                thread_id=thread_id,
                 timeout_s=timeout_s,
                 subject_ids=deep_subjects,
                 response_language=response_language,

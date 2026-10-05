@@ -1,3 +1,4 @@
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -13,6 +14,83 @@ class LearningDialogueTests(unittest.IsolatedAsyncioTestCase):
     setUp = fixtures.LearningPathTests.setUp
     rows = fixtures.LearningPathTests.rows
 
+    async def test_sts_preferences_are_scoped_optional_and_do_not_change_grading(self):
+        from tests.learning.test_ai_learning_plan import AIPlanTests
+        from webapp_core.assistant.assistant_prompts import STS_ANSWER_GUIDANCE
+
+        store = AIPlanTests.publish_memory(
+            self, content="C语言学习偏好：先用红蓝盒子举例，再自己做题。"
+        )
+        AIPlanTests.publish_memory(
+            self, "bob", "C语言学习偏好：只用陌生账号的暗号讲解。"
+        )
+        attempt = self.service.start("c_pointer_01")
+        service = LearningDialogueService(self.service)
+        model = self.model()
+        result = await service.advance(attempt["id"], {"action": "start"}, model)
+        context = json.loads(model.ainvoke.call_args.args[0][1][1])
+        memories = json.dumps(context["personal_memories"], ensure_ascii=False)
+        self.assertIn("红蓝盒子", memories)
+        self.assertNotIn("陌生账号", memories)
+        self.assertIn(STS_ANSWER_GUIDANCE, model.ainvoke.call_args.args[0][0][1])
+        self.assertIsNone(result["evaluation"])
+        self.assertTrue(result["tutoring_viewed"])
+        store.settings("alice", enabled=False)
+        await service.advance(
+            attempt["id"],
+            {"action": "answer", "answer": "不确定", "revision": 1},
+            model,
+        )
+        context = json.loads(model.ainvoke.call_args.args[0][1][1])
+        self.assertEqual(context["personal_memories"], [])
+
+    async def test_forgetting_sts_during_tutoring_rejects_stale_response(self):
+        from tests.learning.test_ai_learning_plan import AIPlanTests
+
+        store = AIPlanTests.publish_memory(self)
+        attempt = self.service.start("c_pointer_01")
+        model = self.model()
+        response = model.ainvoke.return_value
+
+        async def forget(*args):
+            store.settings("alice", forget=True)
+            return response
+
+        model.ainvoke.side_effect = forget
+        with self.assertRaises(LearningConflict):
+            await LearningDialogueService(self.service).advance(
+                attempt["id"], {"action": "start"}, model
+            )
+        self.assertIsNone(self.service.get(attempt["id"])["dialogue"])
+
+    async def test_lru_explanation_gets_verified_example_without_current_answer(self):
+        attempt = self.service.start("lru_01")
+        service = LearningDialogueService(self.service)
+        model = self.model()
+        await service.advance(attempt["id"], {"action": "start"}, model)
+        first = json.loads(model.ainvoke.call_args.args[0][1][1])
+        self.assertIsNone(first["worked_example"])
+        await service.advance(
+            attempt["id"],
+            {"action": "answer", "answer": "我不确定淘汰谁", "revision": 1},
+            model,
+        )
+        example = json.loads(model.ainvoke.call_args.args[0][1][1])["worked_example"]
+        self.assertEqual(example["algorithm"], "LRU")
+        sequence = example["parameters"]["sequence"]
+        self.assertFalse(
+            set(sequence) & set(attempt["exercise"]["parameters"]["sequence"])
+        )
+        self.assertEqual(
+            example["solution"],
+            self.service._solve(
+                {**attempt["exercise"], "parameters": example["parameters"]}
+            ),
+        )
+        self.assertEqual(example["solution"]["trace"][-1]["evicted"], sequence[1])
+        self.assertEqual(example["solution"]["trace"][2]["event"], "hit")
+        self.assertIsNone(self.service.get(attempt["id"])["evaluation"])
+
     def model(self):
         return SimpleNamespace(
             model_name="test",
@@ -23,6 +101,7 @@ class LearningDialogueTests(unittest.IsolatedAsyncioTestCase):
                             "hypothesis": "目前证据不足，可能混淆了执行顺序。",
                             "question": "你判断第一步的依据是什么？",
                             "next_step": "重新检查第一步并提交。",
+                            "explanation": "先区分位置变化与数值变化，再用一个不同输入逐步检查。",
                         },
                         ensure_ascii=False,
                     )
@@ -167,13 +246,54 @@ class LearningDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["dialogue"]["status"], "talking")
         self.assertNotIn("explanation", result["dialogue"])
         for invalid in ({"focus_code": "invented_tag"},
-                        {"ready_to_verify": "true"}, {"explanation": ""}):
+                        {"ready_to_verify": "true"}, {"explanation": ""},
+                        {"ready_to_verify": False, "explanation": "  "}):
             model.ainvoke.return_value.content = json.dumps({**payload, **invalid})
             with self.assertRaises(RuntimeError):
                 await service.advance(attempt["id"], {
                     "action": "answer", "answer": "不确定", "revision": 1,
                 }, model)
             self.assertEqual(self.service.get(attempt["id"])["dialogue"]["revision"], 1)
+
+    async def test_invalid_reply_is_repaired_once_before_saving(self):
+        attempt = self.service.start("dh_01")
+        service = LearningDialogueService(self.service)
+        model = self.model()
+        await service.advance(attempt["id"], {"action": "start"}, model)
+        good = model.ainvoke.return_value
+        context = json.loads(model.ainvoke.call_args.args[0][1][1])
+        invalid = json.loads(good.content)
+        invalid["focus_code"] = next(iter(context["focus_options"].values()))
+        model.ainvoke.reset_mock()
+        model.ainvoke.side_effect = [SimpleNamespace(content=json.dumps(invalid)), good]
+        result = await service.advance(attempt["id"], {
+            "action": "answer", "answer": "不确定", "revision": 1,
+        }, model)
+        self.assertEqual(model.ainvoke.await_count, 2)
+        self.assertEqual(result["dialogue"]["revision"], 2)
+        self.assertEqual(len(result["dialogue"]["turns"]), 2)
+        self.assertIsNone(result["evaluation"])
+
+    async def test_repair_shares_deadline_and_does_not_save_partial_reply(self):
+        attempt = self.service.start("dh_01")
+        service = LearningDialogueService(self.service)
+        await service.advance(attempt["id"], {"action": "start"}, self.model())
+        before = self.service.get(attempt["id"])["dialogue"]
+        model = self.model()
+
+        async def slow_reply(_messages):
+            await asyncio.sleep(0.03)
+            return SimpleNamespace(content="{}")
+
+        model.ainvoke.side_effect = slow_reply
+        timeout = asyncio.timeout
+        with patch("webapp_core.learning.learning_dialogue.asyncio.timeout", side_effect=lambda _: timeout(0.05)):
+            with self.assertRaises(TimeoutError):
+                await service.advance(attempt["id"], {
+                    "action": "answer", "answer": "不确定", "revision": 1,
+                }, model)
+        self.assertEqual(model.ainvoke.await_count, 2)
+        self.assertEqual(self.service.get(attempt["id"])["dialogue"], before)
 
     async def test_diagnosis_without_optional_course_materials(self):
         with patch("webapp_core.learning.learning_path.MATERIAL_ROOT", self.path.parent / "missing"):

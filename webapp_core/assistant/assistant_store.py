@@ -1,11 +1,21 @@
 """Transactional outbox and account-scoped published STS snapshots."""
 
 from contextlib import closing
+import hashlib
 import json
+import os
 from pathlib import Path
+import re
 import sqlite3
 import time
 from uuid import uuid4
+
+
+class MemorySnapshotError(ValueError):
+    def __init__(self):
+        super().__init__(
+            "记忆快照无法读取，请恢复对应记忆文件后重试；也可以清空记忆后重新记录。"
+        )
 
 
 def encode(value):
@@ -63,15 +73,140 @@ class AssistantStore:
     def __init__(self, path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        root = Path(__file__).resolve().parents[2]
+        self.memory_dir = (
+            root / "memory"
+            if self.path.resolve() == root / "data" / "learning.sqlite3"
+            else self.path.resolve().parent / "memory" / self.path.name
+        )
+        self.memory_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         with closing(self.connect()) as db, db:
             schema(db)
+
+    def initialize_memory(self):
+        """Migrate and prune once at process startup, not on request paths."""
+        with closing(self.connect()) as db:
+            owners = [
+                row[0] for row in db.execute("SELECT owner FROM assistant_profiles")
+            ]
+        for owner in owners:
+            with closing(self.connect()) as db, db:
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    value = json.loads(
+                        db.execute(
+                            "SELECT snapshot FROM assistant_profiles WHERE owner=?",
+                            (owner,),
+                        ).fetchone()[0]
+                    )
+                    if not isinstance(value, dict):
+                        raise MemorySnapshotError()
+                    if value and "snapshot_file" not in value:
+                        reference = self._write_snapshot(owner, value)
+                        db.execute(
+                            "UPDATE assistant_profiles SET snapshot=? WHERE owner=?",
+                            (encode(reference), owner),
+                        )
+                except (OSError, ValueError):
+                    self._block_snapshot(db, owner)
+                    continue
+            # Only prune after the new reference has committed. A failed commit
+            # leaves an orphan file, never a reference to a partial snapshot.
+            with closing(self.connect()) as db, db:
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    self._prune_snapshots(db, owner)
+                except (OSError, ValueError, KeyError, TypeError):
+                    self._block_snapshot(db, owner)
+
+    def _block_snapshot(self, db, owner):
+        error = str(MemorySnapshotError())
+        previous = db.execute(
+            "SELECT error FROM assistant_jobs WHERE owner=?", (owner,)
+        ).fetchone()
+        if not previous or previous[0] != error:
+            # Invalidate in-flight personalized replies and cached plans once.
+            db.execute(
+                "UPDATE assistant_profiles SET epoch=epoch+1 WHERE owner=?", (owner,)
+            )
+        db.execute(
+            "INSERT INTO assistant_jobs(owner,attempts,error) VALUES (?,5,?) "
+            "ON CONFLICT(owner) DO UPDATE SET attempts=5,error=excluded.error,token=NULL,lease=0",
+            (owner, error),
+        )
+
+    def _snapshot_path(self, owner, filename):
+        if not isinstance(filename, str) or not re.fullmatch(
+            r"[a-f0-9]{32}\.json", filename
+        ):
+            raise ValueError("Invalid memory snapshot filename")
+        return self.memory_dir / hashlib.sha256(owner.encode()).hexdigest() / filename
+
+    def _write_snapshot(self, owner, snapshot):
+        filename = uuid4().hex + ".json"
+        path = self._snapshot_path(owner, filename)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        try:
+            with path.open("x", encoding="utf-8") as stream:
+                json.dump(snapshot, stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            if os.name != "nt":
+                for folder in (path.parent, self.memory_dir):
+                    directory = os.open(folder, os.O_RDONLY)
+                    try:
+                        os.fsync(directory)
+                    finally:
+                        os.close(directory)
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
+        return {"snapshot_file": filename}
+
+    def _read_snapshot(self, owner, raw):
+        try:
+            reference = json.loads(raw)
+            if reference == {}:
+                return {}
+            path = self._snapshot_path(owner, reference["snapshot_file"])
+            snapshot = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(snapshot, dict):
+                raise ValueError("Snapshot must be an object")
+            for key in ("events", "scopes", "claims", "vectors", "scope_vectors"):
+                if key in snapshot and not isinstance(snapshot[key], dict):
+                    raise ValueError("Invalid snapshot collection")
+            cursor = snapshot.get("processed_through", 0)
+            if type(cursor) is not int or cursor < 0:
+                raise ValueError("Invalid snapshot progress")
+            return snapshot
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise MemorySnapshotError() from error
+
+    def _prune_snapshots(self, db, owner):
+        reference = json.loads(
+            db.execute(
+                "SELECT snapshot FROM assistant_profiles WHERE owner=?", (owner,)
+            ).fetchone()[0]
+        )
+        if reference != {}:
+            self._snapshot_path(owner, reference["snapshot_file"])
+        folder = self.memory_dir / hashlib.sha256(owner.encode()).hexdigest()
+        if folder.exists():
+            for path in folder.glob("*.json"):
+                if re.fullmatch(
+                    r"[a-f0-9]{32}\.json", path.name
+                ) and path.name != reference.get("snapshot_file"):
+                    path.unlink()
+            if not any(folder.iterdir()):
+                folder.rmdir()
 
     def connect(self):
         db = sqlite3.connect(self.path, timeout=15)
         db.row_factory = sqlite3.Row
         return db
 
-    def view(self, owner):
+    def view(self, owner, *, allow_unavailable=False):
+        unavailable = False
         with closing(self.connect()) as db, db:
             db.execute(
                 "INSERT OR IGNORE INTO assistant_profiles(owner) VALUES (?)", (owner,)
@@ -91,7 +226,20 @@ class AssistantStore:
                     (owner,),
                 )
             ]
-        snapshot = json.loads(profile.pop("snapshot"))
+            try:
+                snapshot = self._read_snapshot(owner, profile.pop("snapshot"))
+            except MemorySnapshotError:
+                self._block_snapshot(db, owner)
+                unavailable = True
+                snapshot = {}
+                profile["epoch"] = db.execute(
+                    "SELECT epoch FROM assistant_profiles WHERE owner=?", (owner,)
+                ).fetchone()[0]
+                job = db.execute(
+                    "SELECT * FROM assistant_jobs WHERE owner=?", (owner,)
+                ).fetchone()
+        if unavailable and profile["enabled"] and not allow_unavailable:
+            raise MemorySnapshotError()
         return {
             **profile,
             "enabled": bool(profile["enabled"]),
@@ -100,11 +248,11 @@ class AssistantStore:
             "memory_status": (
                 "paused"
                 if not profile["enabled"]
-                else "failed"
-                if job and job["attempts"] >= 5
-                else "updating"
-                if job
-                else "ready"
+                else (
+                    "failed"
+                    if job and job["attempts"] >= 5
+                    else "updating" if job else "ready"
+                )
             ),
             "memory_error": job["error"] if job else None,
         }
@@ -226,17 +374,28 @@ class AssistantStore:
                 ).fetchone()
             ):
                 db.execute("INSERT INTO assistant_jobs(owner) VALUES (?)", (owner,))
+        if forget or event_ids:
+            with closing(self.connect()) as db, db:
+                db.execute("BEGIN IMMEDIATE")
+                self._prune_snapshots(db, owner)
 
     def claim(self):
         with closing(self.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute(
-                "SELECT j.*,p.epoch FROM assistant_jobs j JOIN assistant_profiles p USING(owner) WHERE p.enabled=1 AND j.lease<? AND j.next_at<=? AND j.attempts<5 ORDER BY j.next_at LIMIT 1",
-                (time.time(), time.time()),
-            ).fetchone()
-            if not row:
-                return None
-            job = dict(row)
+            while True:
+                row = db.execute(
+                    "SELECT j.*,p.epoch,p.snapshot FROM assistant_jobs j JOIN assistant_profiles p USING(owner) WHERE p.enabled=1 AND j.lease<? AND j.next_at<=? AND j.attempts<5 ORDER BY j.next_at LIMIT 1",
+                    (time.time(), time.time()),
+                ).fetchone()
+                if not row:
+                    return None
+                job = dict(row)
+                try:
+                    job["snapshot"] = self._read_snapshot(job["owner"], job["snapshot"])
+                    break
+                except MemorySnapshotError:
+                    self._block_snapshot(db, job["owner"])
+            through = job["snapshot"].get("processed_through", 0)
             job["token"] = uuid4().hex
             db.execute(
                 "UPDATE assistant_jobs SET token=?,lease=?,attempts=attempts+1 WHERE owner=?",
@@ -245,11 +404,38 @@ class AssistantStore:
             job["events"] = [
                 dict(r)
                 for r in db.execute(
-                    "SELECT * FROM assistant_events WHERE owner=? AND active=1 ORDER BY seq",
-                    (job["owner"],),
+                    "SELECT * FROM assistant_events WHERE owner=? AND active=1 AND seq>? ORDER BY seq",
+                    (job["owner"], through),
                 )
             ]
-            job["through"] = max((r["seq"] for r in job["events"]), default=0)
+            for event in job["events"]:
+                # These namespaces are reserved for transactional business writes;
+                # message request IDs cannot contain a colon.
+                event["role"] = (
+                    "system"
+                    if event["id"].startswith(("practice:", "exam:"))
+                    else "user"
+                )
+                event["context"] = []
+                if event["role"] == "user":
+                    size = 0
+                    for message in db.execute(
+                        "SELECT m.id,m.role,m.content,"
+                        "CASE WHEN m.role='user' THEN e.created ELSE m.created END AS created "
+                        "FROM assistant_messages m JOIN assistant_events e "
+                        "ON e.id=CASE WHEN m.role='user' THEN m.id ELSE m.reply_to END "
+                        "AND e.owner=m.owner "
+                        "WHERE m.owner=? AND e.active=1 AND e.seq<? AND m.rowid<"
+                        "(SELECT rowid FROM assistant_messages WHERE owner=? AND id=?) "
+                        "ORDER BY m.rowid DESC LIMIT 8",
+                        (job["owner"], event["seq"], job["owner"], event["id"]),
+                    ):
+                        size += len(message["content"])
+                        if size > 12000:
+                            break
+                        event["context"].append(dict(message))
+                    event["context"].reverse()
+            job["through"] = max((r["seq"] for r in job["events"]), default=through)
             return job
 
     def publish(self, job, snapshot):
@@ -261,9 +447,12 @@ class AssistantStore:
             ).fetchone()
             if not valid:
                 return False
+            reference = self._write_snapshot(
+                job["owner"], {**snapshot, "processed_through": job["through"]}
+            )
             db.execute(
                 "UPDATE assistant_profiles SET snapshot=?,version=version+1 WHERE owner=?",
-                (encode(snapshot), job["owner"]),
+                (encode(reference), job["owner"]),
             )
             more = db.execute(
                 "SELECT 1 FROM assistant_events WHERE owner=? AND seq>?",
@@ -276,7 +465,10 @@ class AssistantStore:
                 )
             else:
                 db.execute("DELETE FROM assistant_jobs WHERE owner=?", (job["owner"],))
-            return True
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            self._prune_snapshots(db, job["owner"])
+        return True
 
     def fail(self, job):
         with closing(self.connect()) as db, db:

@@ -22,7 +22,6 @@ from agenticRAG.agentic_config import (
 )
 from agenticRAG.agentic_schema import (
     EvidenceCheck,
-    QuestionComplexity,
     SubQuestionRewrite,
     SubQuestionQueryPlan,
 )
@@ -31,7 +30,6 @@ llm = ChatOpenAI(model=OPENAI_MODEL, temperature=0)
 llm_subquestion_plan_struct = llm.with_structured_output(SubQuestionQueryPlan)
 llm_evidence_struct = llm.with_structured_output(EvidenceCheck)
 llm_subquestion_rewrite_struct = llm.with_structured_output(SubQuestionRewrite)
-llm_complexity_struct = llm.with_structured_output(QuestionComplexity)
 
 rag_by_working_dir: dict[str, LightRAG] = {}
 rag_init_locks: dict[str, asyncio.Lock] = {}

@@ -19,7 +19,6 @@ from webapp_core.chat.problem_tutoring_service import ProblemTutoringService
 from webapp_core.runtime.session_store import SessionStore
 
 
-
 class ChatService(
     ChatStreamingMixin,
     ChatDeepSearchMixin,
@@ -402,12 +401,6 @@ class ChatService(
                 "answer": answer,
                 "route": {"chain": "direct-local", "reason": "smalltalk_fast_path"},
                 "subject_route": self._fast_subject_route_meta("寒暄本地快路径"),
-                "upgraded": False,
-                "upgrade_reason": "",
-                "instant_review": {
-                    "heuristic": "",
-                    "review": "direct_smalltalk_fast",
-                },
             },
             False,
             1.0,

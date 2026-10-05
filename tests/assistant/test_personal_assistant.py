@@ -1,5 +1,6 @@
 import asyncio
 import importlib.util
+import json
 from contextlib import closing
 from pathlib import Path
 import tempfile
@@ -37,7 +38,8 @@ class AssistantStoreTests(unittest.TestCase):
         self.event("event-b")
         self.assertTrue(self.store.publish(job, {"claims": {}}))
         newer = self.store.claim()
-        self.assertEqual(len(newer["events"]), 2)
+        self.assertEqual([event["id"] for event in newer["events"]], ["event-b"])
+        self.assertEqual(newer["snapshot"]["processed_through"], job["through"])
         self.assertTrue(self.store.publish(newer, {"claims": {}}))
         self.assertEqual(self.store.view("alice")["memory_status"], "ready")
         self.assertEqual(self.store.view("alice")["version"], 2)
@@ -123,6 +125,7 @@ class STSAdapterTests(unittest.IsolatedAsyncioTestCase):
             relation = ScopeEventRelation(
                 id="scope-link",
                 relation={key: "developing" for key in ids},
+                weights={key: 1.0 for key in ids},
                 scope_node_id="scope-a",
             )
             return ScopeExtractResult([scope], "create_new"), [
@@ -268,6 +271,157 @@ class AssistantHTTPTests(unittest.TestCase):
     setUp = school_fixtures.SchoolPermissionsTests.setUp
     credentials = staticmethod(school_fixtures.SchoolPermissionsTests.credentials)
     account = school_fixtures.SchoolPermissionsTests.account
+
+    def test_missing_snapshot_is_visible_and_retry_requires_restored_file(self):
+        owner = self.student_user["id"]
+        store = AssistantStore(self.path)
+        with closing(store.connect()) as db, db:
+            enqueue(db, owner, "file-source", "每天复习半小时")
+        store.publish(store.claim(), {})
+        path = next(store.memory_dir.rglob("*.json"))
+        original = path.read_bytes()
+        path.unlink()
+        response = self.student.get("/api/assistant")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["memory_status"], "failed")
+        self.assertIn("恢复", response.json["memory_error"])
+        failed = self.student.post("/api/assistant/memory/retry", json={})
+        self.assertEqual(failed.status_code, 400)
+        self.assertIn("恢复", failed.json["error"])
+        path.write_bytes(original)
+        self.assertEqual(self.student.post("/api/assistant/memory/retry", json={}).status_code, 200)
+        job = store.claim()
+        self.assertEqual(job["events"], [])
+        self.assertTrue(store.publish(job, job["snapshot"]))
+        self.assertEqual(self.student.get("/api/assistant").json["memory_status"], "ready")
+
+    def test_memory_display_preserves_sources_and_time_ranges(self):
+        owner = self.student_user["id"]
+        store = AssistantStore(self.path)
+        with closing(store.connect()) as db, db:
+            enqueue(db, owner, "display-source", "原始来源")
+        job = store.claim()
+        snapshot = {
+            "events": {"display-source": {
+                "summary": f"{owner}完成lru_01，lru_010不应被替换。",
+                "timestamp": "2026-10-04T20:36:43Z",
+            }},
+            "claims": {
+                "instant": {
+                    "content": f"参与者{owner}通过lru_01。",
+                    "temporal": "2026年10月4日20:36:43",
+                    "event_ids": ["display-source"],
+                },
+                "range": {
+                    "content": "本周每天25分钟，下周恢复50分钟。",
+                    "temporal": "2026年10月4日至10月10日",
+                    "event_ids": ["display-source"],
+                },
+            },
+        }
+        store.publish(job, snapshot)
+        response = self.student.get("/api/assistant")
+        self.assertEqual(response.status_code, 200)
+        memories = {m["id"]: m for m in response.json["memories"]}
+        self.assertIn(self.student_user["name"], memories["instant"]["content"])
+        self.assertIn("LRU · 命中后的置换", memories["instant"]["content"])
+        self.assertNotIn(owner, memories["instant"]["content"])
+        self.assertEqual(memories["instant"]["temporal"], "2026-10-05 04:36:43 北京时间")
+        source = memories["instant"]["sources"][0]
+        self.assertEqual(source["timestamp"], "2026-10-04T20:36:43Z")
+        self.assertEqual(source["timestamp_label"], "2026-10-05 04:36:43 北京时间")
+        self.assertIn("lru_010", source["text"])
+        self.assertEqual(memories["range"]["temporal"], "2026年10月4日至10月10日")
+        self.assertEqual(store.view(owner)["snapshot"], {**snapshot, "processed_through": job["through"]})
+        self.assertEqual(self.other_student.get("/api/assistant").json["memories"], [])
+
+    def test_assistant_receives_assistance_at_each_submission(self):
+        from webapp_core.learning.learning_store import LearningStore
+        from webapp_core.learning.learning_service import LearningService
+        from tests.learning.test_learning_service import LRU_01
+
+        learning = LearningService(
+            LearningStore(self.path, owner_id=self.student_user["id"]), self.solver
+        )
+        attempt = learning.start("lru_01")
+        wrong = [dict(row) for row in LRU_01]
+        wrong[-1]["evicted"] = "2"
+        learning.submit(attempt["id"], wrong)
+        learning.hint(attempt["id"], None)
+        learning.solution(attempt["id"])
+        learning.submit(attempt["id"], LRU_01)
+        repeated = learning.start("lru_01")
+        learning.submit(repeated["id"], LRU_01)
+        learning.start("dh_01", assignment_id="private-assignment")
+        other = LearningService(
+            LearningStore(self.path, owner_id=self.other_user["id"]), self.solver
+        )
+        other.start("c_pointer_01")
+        model = AsyncMock(return_value=SimpleNamespace(content="先继续新题核验。"))
+        with patch("webapp_core.chat.auto_runtime.auto_router_llm", SimpleNamespace(ainvoke=model)):
+            response = self.student.post("/api/assistant/messages", json={
+                "request_id": "context-check-123456", "content": "我的作答情况如何？"
+            })
+        self.assertEqual(response.status_code, 200, response.json)
+        prompt = model.call_args.args[0][0][1]
+        context = json.loads(prompt.split("\n授权上下文：", 1)[1])
+        progress = context["recent_practice"]
+        self.assertEqual(len(progress), 2)
+        corrected = next(p for p in progress if p["提交次数"] == 2)
+        self.assertEqual(corrected["课程"], "操作系统")
+        self.assertEqual(corrected["题型"], "page_replacement")
+        self.assertEqual(corrected["累计提示次数"], 1)
+        self.assertTrue(corrected["已查看解析"])
+        self.assertFalse(corrected["新题首次独立通过"])
+        first, second = corrected["逐次提交"]
+        self.assertTrue(first["新题首次独立作答"])
+        self.assertFalse(first["通过"])
+        self.assertFalse(first["提交时的辅助记录"]["查看解析"])
+        self.assertTrue(second["通过"])
+        self.assertFalse(second["新题首次独立作答"])
+        self.assertTrue(second["提交时的辅助记录"]["查看解析"])
+        repeat = next(p for p in progress if p["提交次数"] == 1)
+        self.assertTrue(repeat["逐次提交"][0]["提交时的辅助记录"]["重复题"])
+        self.assertFalse(repeat["新题首次独立通过"])
+
+    def test_failed_reply_can_retry_without_duplicate_messages(self):
+        data = {"request_id": "retry-timeout-123456", "content": "我该怎么复习？"}
+        model = AsyncMock(side_effect=[TimeoutError(), SimpleNamespace(content="先用新题核验。")])
+        with patch("webapp_core.chat.auto_runtime.auto_router_llm", SimpleNamespace(ainvoke=model)):
+            failed = self.student.post("/api/assistant/messages", json=data)
+            self.assertEqual(failed.status_code, 503)
+            messages = self.student.get("/api/assistant").json["messages"]
+            self.assertEqual(len(messages), 1)
+            self.assertEqual(messages[0]["status"], "failed")
+            retried = self.student.post("/api/assistant/messages", json=data)
+            self.assertEqual(retried.status_code, 200)
+            duplicate = self.student.post("/api/assistant/messages", json=data)
+            self.assertEqual(duplicate.status_code, 200)
+        self.assertEqual(model.await_count, 2)
+        self.assertEqual(len(duplicate.json["messages"]), 2)
+        self.assertEqual(duplicate.json["messages"][1]["content"], "先用新题核验。")
+
+    def test_followup_keeps_history_as_data_and_current_request_separate(self):
+        from webapp_core.assistant.assistant_prompts import STS_ANSWER_GUIDANCE
+
+        model = AsyncMock(return_value=SimpleNamespace(content="请补充章节范围。"))
+        with patch("webapp_core.chat.auto_runtime.auto_router_llm", SimpleNamespace(ainvoke=model)):
+            self.student.post("/api/assistant/messages", json={
+                "request_id": "history-context-0001", "content": "我每天只有20分钟。",
+            })
+            response = self.student.post("/api/assistant/messages", json={
+                "request_id": "history-context-0002", "content": "先复习虚拟内存，按刚才的时间安排。",
+            })
+        self.assertEqual(response.status_code, 200)
+        messages = model.call_args.args[0]
+        self.assertIn(STS_ANSWER_GUIDANCE, messages[0][1])
+        self.assertEqual([role for role, _ in messages], ["system", "human"])
+        self.assertEqual(messages[-1][1], "先复习虚拟内存，按刚才的时间安排。")
+        context = json.loads(messages[0][1].split("\n授权上下文：", 1)[1])
+        self.assertEqual(context["conversation"], [
+            {"role": "user", "content": "我每天只有20分钟。"},
+            {"role": "assistant", "content": "请补充章节范围。"},
+        ])
 
     def test_identity_messages_and_private_memory(self):
         self.assertEqual(self.app.test_client().get("/api/assistant").status_code, 401)

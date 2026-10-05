@@ -44,6 +44,39 @@ class LearningPathTests(unittest.TestCase):
         self.service.submit(attempt["id"], wrong)
         return attempt
 
+    def test_recommendation_tracks_correction_then_unsubmitted_new_question(self):
+        from tests.learning.test_learning_service import LRU_01, LRU_02
+
+        original = self.service.start("lru_01")
+        wrong = copy.deepcopy(LRU_01)
+        wrong[-1]["evicted"] = "2"
+        self.service.submit(original["id"], wrong)
+
+        def action():
+            point = next(p for p in self.study.dashboard()["points"] if p["id"] == "operating_systems:LRU")
+            return point["actions"][0]
+
+        correction = action()
+        self.assertEqual(correction["title"], "订正原题")
+        self.assertEqual(correction["attempt_id"], original["id"])
+        self.assertEqual(correction["submission_count"], 1)
+        self.service.hint(original["id"], None)
+        self.service.submit(original["id"], LRU_01)
+        new = self.service.start("lru_02")
+        recommendation = action()
+        self.assertEqual(recommendation["title"], "继续新题作答")
+        self.assertEqual(recommendation["exercise_id"], "lru_02")
+        self.assertEqual(recommendation["submission_count"], 0)
+        self.assertNotIn("核对错误", recommendation["reason"])
+        opened = self.study.begin_recommendation("operating_systems:LRU", recommendation["token"])
+        self.assertEqual(opened["attempt_id"], new["id"])
+        self.service.hint(new["id"], None)
+        self.assertEqual(action()["title"], "继续辅助练习")
+        self.service.submit(new["id"], LRU_02)
+        repeat = self.service.start("lru_01")
+        self.assertEqual(action()["title"], "继续重复练习")
+        self.assertEqual(action()["attempt_id"], repeat["id"])
+
     def test_all_three_course_materials_and_source_ranges(self):
         for subject in COURSES:
             for chapter in course_chapters(subject):

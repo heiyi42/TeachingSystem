@@ -6,6 +6,7 @@ from webapp_core.learning.learning_dialogue import LearningDialogueService
 from webapp_core.learning.learning_plan import LearningPlanService
 from webapp_core.learning.learning_service import LearningConflict
 from webapp_core.runtime.workflow_runs import WorkflowConflict
+from webapp_core.assistant.assistant_store import AssistantStore
 
 
 class LearningWorkflow:
@@ -28,8 +29,14 @@ class LearningWorkflow:
                 self.learning.tasks.school.class_access(
                     source["class_id"], self.learning.tasks.user
                 )
+            personal = AssistantStore(self.learning.store.path).view(self.owner)
             return (
-                source["updated_at"],
+                [
+                    source["updated_at"],
+                    personal["enabled"],
+                    personal["epoch"],
+                    personal["version"],
+                ],
                 (source.get("dialogue") or {}).get("workflow_run_id"),
             )
         if kind == "learning_plan":

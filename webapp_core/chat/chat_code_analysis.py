@@ -140,7 +140,9 @@ class ChatCodeAnalysisMixin:
                 },
                 "route": {
                     "chain": "code_analysis",
-                    "reason": str(code_candidate.get("trigger") or "compiler_unavailable"),
+                    "reason": str(
+                        code_candidate.get("trigger") or "compiler_unavailable"
+                    ),
                     "tool": str(analysis.get("tool") or ""),
                     "compile_ok": False,
                     "tool_available": False,
@@ -148,10 +150,6 @@ class ChatCodeAnalysisMixin:
                 "subject_route": self._build_subject_route_meta(
                     self._build_code_analysis_subject_route()
                 ),
-                "upgraded": False,
-                "upgrade_reason": "",
-                "instant_review": None,
-                "raw": {"code_analysis": analysis},
             }
 
         prompt = self._build_code_analysis_prompt(
@@ -188,8 +186,4 @@ class ChatCodeAnalysisMixin:
             "subject_route": self._build_subject_route_meta(
                 self._build_code_analysis_subject_route()
             ),
-            "upgraded": False,
-            "upgrade_reason": "",
-            "instant_review": None,
-            "raw": {"code_analysis": analysis},
         }

@@ -42,13 +42,6 @@ class SubQuestionQueryPlan(BaseModel):
     ]
 
 
-class QuestionComplexity(BaseModel):
-    complexity: Literal["simple", "complex"] = Field(
-        description="问题复杂度分类:simple 表示可直接检索回答,complex 表示需要拆分多步检索",
-    )
-    reason: str = Field(description="分类理由，简短即可")
-
-
 class EvidenceCheck(BaseModel):
     sufficient: bool = Field(description="当前检索结果是否足以回答该子问题")
     reason: str = Field(description="判断理由，简短即可")
@@ -66,14 +59,9 @@ class SubQuestionRewrite(BaseModel):
 
 class State(TypedDict, total=False):
     question: str
-    requested_mode: str
-    detected_complexity: str
-    question_complexity: str
-    effective_strategy: str
-    planning_reason: str
-    sub_questions: List[Any]
+    sub_questions: List[Dict[str, Any]]
     subquery_tasks: List[Dict[str, Any]]
-    subquery_results: List[Dict[str, str]]
+    subquery_results: List[Dict[str, Any]]
     allowed_subject_ids: List[str]
     subject_working_dirs: Dict[str, str]
     response_language: str
@@ -81,6 +69,5 @@ class State(TypedDict, total=False):
     needs_retry: bool
     insufficient_subquestion_ids: List[str]
     query_total_ms: str
-    final_answer: str
     answer_style_instruction: str
     retry_rewrites: List[Dict[str, Any]]

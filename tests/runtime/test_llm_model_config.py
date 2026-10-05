@@ -17,6 +17,50 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ModelConfigTests(unittest.IsolatedAsyncioTestCase):
+    async def test_routing_transport_omits_temperature_and_bounds_retries(self):
+        import httpx
+        from openai import AsyncOpenAI, BadRequestError, InternalServerError
+        from webapp_core.chat.auto_runtime import auto_router_llm
+
+        self.assertNotIn("temperature", auto_router_llm._default_params)
+        for failure, persistent, expected_calls in [
+            (500, False, 2), ("timeout", False, 2), (400, True, 1), (503, True, 2),
+        ]:
+            with self.subTest(failure=failure):
+                requests = []
+
+                def respond(request):
+                    requests.append(json.loads(request.content))
+                    if persistent or len(requests) == 1:
+                        if failure == "timeout":
+                            raise httpx.ReadTimeout("test timeout", request=request)
+                        return httpx.Response(failure, json={"error": {"message": "test failure", "type": "api_error"}})
+                    return httpx.Response(200, json={
+                        "id": "test", "object": "chat.completion", "created": 0,
+                        "model": auto_router_llm.model_name,
+                        "choices": [{"index": 0, "message": {"role": "assistant", "content": "已核对"}, "finish_reason": "stop"}],
+                    })
+
+                async with AsyncOpenAI(
+                    api_key="test", base_url="https://model.example.invalid/v1",
+                    timeout=auto_router_llm.request_timeout,
+                    max_retries=auto_router_llm.max_retries,
+                    http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
+                ) as client:
+                    model = auto_router_llm.model_copy(update={
+                        "async_client": client.chat.completions,
+                        "root_async_client": client,
+                        "cache": False,
+                    })
+                    if persistent:
+                        with self.assertRaises(BadRequestError if failure == 400 else InternalServerError):
+                            await model.ainvoke([("human", "核对测试记录")])
+                    else:
+                        result = await model.ainvoke([("human", "核对测试记录")])
+                        self.assertEqual(result.content, "已核对")
+                self.assertEqual(len(requests), expected_calls)
+                self.assertTrue(all("temperature" not in request for request in requests))
+
     def test_model_setting_reaches_chat_routing_and_summary_from_other_cwd(self):
         script = """
 import json

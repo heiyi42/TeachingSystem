@@ -27,11 +27,13 @@ def main():
     args = parser.parse_args()
     logging.disable(logging.CRITICAL)
     store = AssistantStore(args.store)
+    store.initialize_memory()
     while True:
-        job = store.claim()
+        job = None
         failed = False
-        if job:
-            try:
+        try:
+            job = store.claim()
+            if job:
                 from webapp_core.assistant.assistant_memory import STSMemory
 
                 # Upstream benchmark extractors print prompts and responses.
@@ -43,17 +45,23 @@ def main():
                 ):
                     result = asyncio.run(
                         asyncio.wait_for(
-                            STSMemory().build(job["owner"], job["events"]), timeout=480
+                            STSMemory().build(
+                                job["owner"], job["events"], job["snapshot"]
+                            ),
+                            timeout=480,
                         )
                     )
                 store.publish(job, result)
-            except Exception as error:
-                failed = True
-                store.fail(job)
-                # Do not log user content, prompts, or provider credentials.
-                print(
-                    f"Assistant memory build failed: {type(error).__name__}", flush=True
-                )
+        except Exception as error:
+            failed = True
+            if job:
+                try:
+                    store.fail(job)
+                except Exception:
+                    # A DB outage must not terminate the worker; the lease expires.
+                    pass
+            # Do not log user content, prompts, or provider credentials.
+            print(f"Assistant memory update failed: {type(error).__name__}", flush=True)
         if args.once:
             return 1 if failed else 0
         time.sleep(2)

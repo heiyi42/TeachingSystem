@@ -5,7 +5,6 @@ from contextlib import aclosing
 from agenticRAG.answer_evidence import (
     answer_evidence,
     citation_result,
-    load_query_evidence,
 )
 import time
 from typing import Any, Awaitable, Callable
@@ -20,7 +19,6 @@ from agenticRAG.agentic_nodes import (
     build_final_answer_prompt,
 )
 from agenticRAG.agentic_runtime import get_rag, llm
-from lightrag import QueryParam
 
 from webapp_core import config as cfg
 
@@ -123,13 +121,8 @@ class ChatRetrievalSupportMixin:
                 "solver": str((solver_result or {}).get("solver", "")),
             },
             "subject_route": self._build_subject_route_meta(subject_route or {}),
-            "upgraded": False,
-            "upgrade_reason": "",
-            "instant_review": None,
             "elapsed_ms": str(total_ms),
-            "raw": {"problem_tutoring": prepared},
         }
-
 
     async def _stream_llm_text(
         self,
@@ -184,7 +177,6 @@ class ChatRetrievalSupportMixin:
     def _subject_working_dir(self, subject_id: str) -> str:
         return self.subject_catalog[subject_id]["working_dir"]
 
-
     @staticmethod
     def _build_subject_route_meta(subject_route: dict[str, Any]) -> dict[str, Any]:
         ranked = [
@@ -207,28 +199,6 @@ class ChatRetrievalSupportMixin:
         ]
         await asyncio.gather(*tasks)
         return subject_ids
-
-    async def retrieve_subject_evidence(
-        self, question: str, subject_id: str, timeout_s: int
-    ) -> dict[str, Any]:
-        started = time.perf_counter()
-        async with asyncio.timeout(max(1, int(timeout_s))):
-            rag = await get_rag(self._subject_working_dir(subject_id))
-            raw = await rag.aquery_data(
-                question,
-                param=QueryParam(
-                    mode="naive", top_k=20, chunk_top_k=10, enable_rerank=False
-                ),
-            )
-            evidence = await load_query_evidence(raw, rag, subject_id)
-        return {
-            "mode_used": "retrieval",
-            "answer": "\n\n".join(item["text"] for item in evidence),
-            "query_status": "success" if evidence else "failure",
-            "query_message": "" if evidence else "没有可核对的课程原文",
-            "evidence": evidence,
-            "elapsed_ms": str(int((time.perf_counter() - started) * 1000)),
-        }
 
     async def _run_deepsearch_plan_state(
         self,
@@ -343,7 +313,6 @@ class ChatRetrievalSupportMixin:
                 "citations": citations,
                 "query_total_ms": str(total_ms),
                 "raw": {
-                    "final_answer": answer,
                     "query_total_ms": str(total_ms),
                     "sub_questions": state.get("sub_questions", []),
                     "subquery_tasks": state.get("subquery_tasks", []),

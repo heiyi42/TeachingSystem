@@ -891,12 +891,29 @@ class LearningPathService:
                 active,
                 key=lambda s: (s["status"] != "needs_correction", -s["updated_at"]),
             )[0]
+            if target["submissions"]:
+                title = "订正原题"
+                reason = "这道题已有未通过的提交，核对错误步骤后完成订正；订正通过不算首次独立通过。"
+            elif target.get("previously_seen"):
+                title = "继续重复练习"
+                reason = "这道题之前已接触，本次尚未提交；完成后可巩固，但不增加新题独立证据。"
+            elif target["hint_count"] or target["solution_viewed"] or target.get("tutoring_viewed"):
+                title = "继续辅助练习"
+                reason = "这道题尚未提交，但已使用提示、解析或辅导；完成后再用未见新题独立验证。"
+            else:
+                title = "继续新题作答"
+                reason = "这道新题已开始但尚未提交，先在无辅助情况下完成，用本题结果检验能否独立应用。"
+            exercise = self.learning._exercise(target)
             actions.append(
                 dict(
                     kind="continue",
-                    title="订正原题" if target["submissions"] else "继续未完成练习",
+                    title=title,
                     attempt_id=target["id"],
-                    reason="这次练习仍有待处理的作答，先完成并核对错误步骤。",
+                    exercise_id=target["exercise_id"],
+                    exercise_title=exercise["title"],
+                    attempt_status=target["status"],
+                    submission_count=len(target["submissions"]),
+                    reason=reason,
                     priority=0,
                 )
             )

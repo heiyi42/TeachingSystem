@@ -27,6 +27,8 @@ class TeacherAssistantTests(unittest.TestCase):
         return result.json, model
 
     def test_report_uses_authorized_evidence_and_retry_is_idempotent(self):
+        from webapp_core.assistant.assistant_prompts import STS_ANSWER_GUIDANCE
+
         task, classroom, _ = self.setup_task()
         self.submit(self.start_task(task), False)
         args = dict(class_id=classroom["id"], chapter_id="cybersec_lab_02")
@@ -36,6 +38,7 @@ class TeacherAssistantTests(unittest.TestCase):
         names = {t["function"]["name"] for t in model.bind_tools.call_args.args[0]}
         self.assertEqual(names, {"class_learning_report", "draft_teaching_plan", "prepare_teaching_homework"})
         context = model.ainvoke.call_args.args[0][0][1]
+        self.assertIn(STS_ANSWER_GUIDANCE, context)
         self.assertIn(classroom["title"], context)
         self.assertIn("加密机制", context)
         repeated, second = self.chat("class_learning_report", args)

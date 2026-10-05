@@ -5,7 +5,6 @@ import json
 import threading
 import time
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
 from types import SimpleNamespace
 
 from webapp_core.chat.chat_service import ChatService
@@ -103,7 +102,6 @@ class ChatStreamingTests(unittest.TestCase):
         service.submit_async = None
         service.run_async = asyncio.run
         return service
-
 
     def test_iter_answer_chunks_splits_text_by_chunk_size(self) -> None:
         chunks = ChatService.iter_answer_chunks("abcdefghij", 4)
@@ -253,7 +251,6 @@ class ChatStreamingTests(unittest.TestCase):
                 service._stream_mode_with_retrieval.assert_not_awaited()
                 service.graph_service.local_subgraph.assert_not_called()
 
-
     def test_match_problem_tutoring_request_requires_explicit_button(self) -> None:
         service = self._build_service()
 
@@ -307,10 +304,6 @@ class ChatStreamingTests(unittest.TestCase):
                     "top_k": 30,
                     "chunk_top_k": 8,
                     "target_subjects": ["C_program"],
-                    "route_reason": "匹配 C 语言内存主题",
-                    "ranked_subjects": [
-                        {"subject": "C_program", "score": 0.92}
-                    ],
                     "sufficient": "True",
                     "judge_reason": "证据足够",
                 }
@@ -422,7 +415,12 @@ class ChatStreamingTests(unittest.TestCase):
             ("workflow_node_end", "deepsearch_plan", "success"),
             workflow_events,
         )
-        self.assertFalse(any(node in {"subject_route", "deepsearch_subject_route"} for _, node, _ in workflow_events))
+        self.assertFalse(
+            any(
+                node in {"subject_route", "deepsearch_subject_route"}
+                for _, node, _ in workflow_events
+            )
+        )
         plan_end_index = workflow_events.index(
             ("workflow_node_end", "deepsearch_plan", "success")
         )
@@ -438,7 +436,10 @@ class ChatStreamingTests(unittest.TestCase):
         )
         self.assertLess(plan_start_index, graph_end_index)
         self.assertEqual(done_payloads[0]["mode_used"], "deepsearch")
-        self.assertEqual(captured["stream_kwargs"]["subject_route"]["requested_subjects"], ["C_program"])
+        self.assertEqual(
+            captured["stream_kwargs"]["subject_route"]["requested_subjects"],
+            ["C_program"],
+        )
         self.assertEqual(captured["stream_kwargs"]["requested_subjects"], [])
         self.assertEqual(
             done_payloads[0]["subject_route"]["reason"],
@@ -477,17 +478,16 @@ class ChatStreamingTests(unittest.TestCase):
             "neo4j_subgraph",
             [step["nodeId"] for step in explainability["workflowSteps"]],
         )
-        self.assertFalse(explainability["deepsearchTrace"]["subjectLock"]["enabled"])
         self.assertEqual(
-            explainability["deepsearchTrace"]["subQuestionRoutes"][0]["primarySubject"],
-            "C_program",
-        )
-        self.assertEqual(
-            service.store.saved_answers[-1]["message_details"]["explainability"]["mode"],
+            service.store.saved_answers[-1]["message_details"]["explainability"][
+                "mode"
+            ],
             "deepsearch",
         )
 
-    def test_deepsearch_records_subject_lock_without_gateway_node(self) -> None:
+    def test_deepsearch_preserves_selected_courses_and_rewrites_without_gateway_node(
+        self,
+    ) -> None:
         service = self._build_service()
         captured: dict[str, object] = {}
 
@@ -517,10 +517,6 @@ class ChatStreamingTests(unittest.TestCase):
                             "top_k": 30,
                             "chunk_top_k": 8,
                             "target_subjects": ["C_program"],
-                            "route_reason": "deepsearch 候选学科已锁定为 C语言",
-                            "ranked_subjects": [
-                                {"subject": "C_program", "score": 1.0}
-                            ],
                             "sufficient": "False",
                             "judge_reason": "缺少数组指针证据",
                             "rewritten_question": "",
@@ -584,12 +580,6 @@ class ChatStreamingTests(unittest.TestCase):
         self.assertIn("deepsearch_retry", workflow_node_ids)
         self.assertNotIn("neo4j_subgraph", workflow_node_ids)
         trace = explainability["deepsearchTrace"]
-        self.assertTrue(trace["subjectLock"]["enabled"])
-        self.assertEqual(trace["subjectLock"]["subjectIds"], ["C_program"])
-        self.assertEqual(
-            trace["subQuestionRoutes"][0]["targetSubjects"],
-            ["C_program"],
-        )
         rewrite = trace["retry"]["rewrites"][0]
         self.assertEqual(rewrite["previousUsedQuestion"], "指针是什么？")
         self.assertEqual(rewrite["rewrittenQuestion"], "C 语言数组指针是什么？")

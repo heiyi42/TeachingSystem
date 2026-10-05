@@ -27,6 +27,8 @@ htmlcov/
 /storage/
 /tmp/
 /output/
+/memory/*
+!/memory/.gitkeep
 .playwright-cli/
 /submission.plist
 

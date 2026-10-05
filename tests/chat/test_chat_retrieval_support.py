@@ -154,33 +154,6 @@ class ChatRetrievalSupportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(emitted, ["Hello", " world.", " Done"])
         self.assertEqual(before_first_emit_counts, [0])
 
-    async def test_secondary_evidence_returns_originals_without_generating_a_summary(
-        self,
-    ) -> None:
-        service = self._build_service()
-        rag = AsyncMock()
-        rag.aquery_data.return_value = {
-            "status": "success",
-            "data": {"chunks": [{"chunk_id": "c", "content": "课程原文"}]},
-        }
-        rag.text_chunks.get_by_ids.return_value = [
-            {"content": "课程原文", "full_doc_id": "d"}
-        ]
-        rag.full_docs.get_by_ids.return_value = [
-            {"content": "[章节标题] 指针\n课程原文", "file_path": "/data/指针.txt"}
-        ]
-        with patch.object(
-            retrieval_support_module, "get_rag", new=AsyncMock(return_value=rag)
-        ) as get_rag:
-            result = await service.retrieve_subject_evidence(
-                "测试问题", "C_program", 10
-            )
-        get_rag.assert_awaited_once_with("/tmp/C_program")
-        rag.aquery_llm.assert_not_awaited()
-        self.assertEqual(result["answer"], "课程原文")
-        self.assertEqual(result["evidence"][0]["source"], "指针.txt")
-        self.assertEqual(result["query_status"], "success")
-
     async def test_run_deepsearch_plan_state_delegates_to_agenticrag_kernel(
         self,
     ) -> None:
@@ -191,8 +164,6 @@ class ChatRetrievalSupportTests(unittest.IsolatedAsyncioTestCase):
             "run_question_plan_state",
             new=AsyncMock(
                 return_value={
-                    "requested_mode": "deepsearch",
-                    "effective_strategy": "deep",
                     "sub_questions": ["Q1", "Q2"],
                 }
             ),
@@ -212,14 +183,9 @@ class ChatRetrievalSupportTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             kwargs["subject_working_dirs"],
-            {
-                subject_id: f"/tmp/{subject_id}"
-                for subject_id in ["C_program"]
-            },
+            {subject_id: f"/tmp/{subject_id}" for subject_id in ["C_program"]},
         )
         self.assertNotIn("route_subquestion_subjects", kwargs)
-        self.assertEqual(state["requested_mode"], "deepsearch")
-        self.assertEqual(state["effective_strategy"], "deep")
         self.assertEqual(state["sub_questions"], ["Q1", "Q2"])
 
     async def test_stream_routed_deepsearch_builds_prompt_before_streaming_output(

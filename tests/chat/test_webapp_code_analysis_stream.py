@@ -87,10 +87,6 @@ class WebappCodeAnalysisStreamTests(unittest.TestCase):
                     "primary_subject": "C_program",
                     "requested_subjects": ["C_program"],
                 },
-                "upgraded": False,
-                "upgrade_reason": "",
-                "instant_review": None,
-                "raw": {"code_analysis": {"compile_ok": True}},
             }
 
         with (

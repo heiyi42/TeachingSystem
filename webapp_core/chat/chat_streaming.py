@@ -202,13 +202,14 @@ class ChatStreamingMixin:
         )
         response_language = self._response_language_from_question(question)
         explicit_subjects = list(requested_subjects or [])
-        default_timeout = cfg.DEFAULT_TIMEOUT_BY_MODE.get(mode, cfg.INSTANT_QUERY_TIMEOUT_S)
+        default_timeout = cfg.DEFAULT_TIMEOUT_BY_MODE.get(
+            mode, cfg.INSTANT_QUERY_TIMEOUT_S
+        )
         timeout_s = safe_int(payload.get("timeout"), default_timeout, floor=1)
 
         def event_stream():
             request_started_at = time.perf_counter()
             first_text_at = None
-            review_ms = None
             if workflow_run:
                 workflow_run.started = True
             event_queue: Queue = Queue()
@@ -355,41 +356,6 @@ class ChatStreamingMixin:
                     if str(item or "").strip() in self.subject_catalog
                 ]
 
-            def _normalize_ranked_subjects(value: Any) -> list[dict[str, Any]]:
-                if not isinstance(value, list):
-                    return []
-                ranked: list[dict[str, Any]] = []
-                for item in value:
-                    subject_id = ""
-                    score = 0.0
-                    if isinstance(item, dict):
-                        subject_id = str(
-                            item.get("subject")
-                            or item.get("subject_id")
-                            or item.get("id")
-                            or ""
-                        )
-                        raw_score = item.get("score", 0.0)
-                    elif isinstance(item, (list, tuple)) and item:
-                        subject_id = str(item[0] or "")
-                        raw_score = item[1] if len(item) > 1 else 0.0
-                    else:
-                        continue
-                    if subject_id not in self.subject_catalog:
-                        continue
-                    try:
-                        score = float(raw_score)
-                    except (TypeError, ValueError):
-                        score = 0.0
-                    ranked.append(
-                        {
-                            "subject": subject_id,
-                            "label": self._subject_label(subject_id),
-                            "score": score,
-                        }
-                    )
-                return ranked
-
             def _safe_optional_int(value: Any) -> int | None:
                 if value is None or value == "":
                     return None
@@ -466,7 +432,6 @@ class ChatStreamingMixin:
                     ).strip()
                     results.append(
                         {
-                            "resultId": str(raw_item.get("id") or "").strip(),
                             "taskId": str(raw_item.get("task_id") or "").strip(),
                             "subQuestionId": str(
                                 raw_item.get("sub_question_id")
@@ -587,17 +552,7 @@ class ChatStreamingMixin:
                     if isinstance(raw.get("sub_questions", []), list)
                     else []
                 )
-                lock_subject_ids = [
-                    subject_id
-                    for subject_id in requested_subjects
-                    if subject_id in self.subject_catalog
-                ]
-                subject_lock_enabled = bool(lock_subject_ids)
-                subject_lock_labels = [
-                    self._subject_label(subject_id) for subject_id in lock_subject_ids
-                ]
                 sub_questions: list[dict[str, Any]] = []
-                sub_question_routes: list[dict[str, Any]] = []
                 review_items: list[dict[str, Any]] = []
 
                 for index, raw_item in enumerate(raw_sub_questions):
@@ -616,32 +571,6 @@ class ChatStreamingMixin:
                     query_mode = str(
                         item.get("query_mode") or item.get("queryMode") or "hybrid"
                     ).strip()
-                    target_subjects = _normalize_subject_ids(
-                        item.get("target_subjects") or item.get("targetSubjects")
-                    )
-                    route_reason = str(
-                        item.get("route_reason") or item.get("routeReason") or ""
-                    ).strip()
-                    ranked_subjects = _normalize_ranked_subjects(
-                        item.get("ranked_subjects") or item.get("rankedSubjects")
-                    )
-                    if subject_lock_enabled:
-                        target_subjects = list(lock_subject_ids)
-                        if not ranked_subjects:
-                            ranked_subjects = [
-                                {
-                                    "subject": subject_id,
-                                    "label": self._subject_label(subject_id),
-                                    "score": 1.0 if idx == 0 else 0.0,
-                                }
-                                for idx, subject_id in enumerate(lock_subject_ids)
-                            ]
-                        route_reason = (
-                            route_reason
-                            or f"用户指定学科，锁定为{'、'.join(subject_lock_labels)}"
-                        )
-
-                    primary_subject = target_subjects[0] if target_subjects else ""
                     sub_questions.append(
                         {
                             "id": sub_id,
@@ -654,20 +583,6 @@ class ChatStreamingMixin:
                             "chunkTopK": _safe_optional_int(
                                 item.get("chunk_top_k") or item.get("chunkTopK")
                             ),
-                        }
-                    )
-                    sub_question_routes.append(
-                        {
-                            "subQuestionId": sub_id,
-                            "primarySubject": primary_subject,
-                            "primarySubjectLabel": (
-                                self._subject_label(primary_subject)
-                                if primary_subject in self.subject_catalog
-                                else ""
-                            ),
-                            "targetSubjects": target_subjects,
-                            "rankedSubjects": ranked_subjects,
-                            "reason": route_reason,
                         }
                     )
                     review_items.append(
@@ -700,7 +615,6 @@ class ChatStreamingMixin:
                 ) or (len(final_prompt) if final_prompt else None)
                 trace = {
                     "subQuestions": sub_questions,
-                    "subQuestionRoutes": sub_question_routes,
                     "subqueryTasks": _normalize_subquery_tasks(
                         raw.get("subquery_tasks")
                     ),
@@ -715,16 +629,6 @@ class ChatStreamingMixin:
                             str(item) for item in insufficient_ids
                         ],
                         "rewrites": retry_rewrites,
-                    },
-                    "subjectLock": {
-                        "enabled": subject_lock_enabled,
-                        "subjectIds": lock_subject_ids,
-                        "subjectLabels": subject_lock_labels,
-                        "reason": (
-                            f"所有子问题仅在{'、'.join(subject_lock_labels)}知识库内检索"
-                            if subject_lock_enabled
-                            else ""
-                        ),
                     },
                 }
                 if final_prompt:
@@ -817,7 +721,6 @@ class ChatStreamingMixin:
                         if first_text_at is not None
                         else None
                     ),
-                    "reviewMs": review_ms,
                 }
                 if workflow_run:
                     base["workflow_run_id"] = workflow_run.id
@@ -846,11 +749,8 @@ class ChatStreamingMixin:
                 duration_ms: int | None = None,
                 details: dict[str, Any] | None = None,
             ) -> None:
-                nonlocal review_ms
                 started_at = workflow_started_at.pop(node_id, time.perf_counter())
                 measured_ms = int((time.perf_counter() - started_at) * 1000)
-                if node_id in {"instant_review", "auto_merge_review"}:
-                    review_ms = (review_ms or 0) + measured_ms
                 data = {
                     "nodeId": node_id,
                     "nodeName": node_name,
@@ -890,7 +790,6 @@ class ChatStreamingMixin:
                     data["details"] = details
                 record_workflow_step(data)
                 push_event("workflow_node_end", data)
-
 
             def workflow_error(
                 node_id: str,
@@ -1341,11 +1240,15 @@ class ChatStreamingMixin:
                                 "subject_route": subject_route_meta,
                             },
                         )
-                        remaining_timeout_s = int(timeout_s - (time.perf_counter() - request_started_at))
+                        remaining_timeout_s = int(
+                            timeout_s - (time.perf_counter() - request_started_at)
+                        )
                         if remaining_timeout_s <= 0:
                             raise TimeoutError("请求总超时预算已耗尽")
-                        if retrieval_used and mode != "instant" and not (
-                            workflow_run and workflow_run.resume
+                        if (
+                            retrieval_used
+                            and mode != "instant"
+                            and not (workflow_run and workflow_run.resume)
                         ):
                             await start_or_run_graph_update(
                                 subject_route_meta,
@@ -1374,6 +1277,7 @@ class ChatStreamingMixin:
                             workflow_end("answer_generate", "答案生成", "题目辅导完成")
                         elif retrieval_used:
                             if mode == "deepsearch":
+
                                 def subquestion_count(
                                     stage_state: dict[str, Any]
                                 ) -> int:
@@ -1550,7 +1454,6 @@ class ChatStreamingMixin:
                                     requested_subjects=requested_subjects,
                                     user_question=question,
                                     augmented_question=augmented_question,
-                                    thread_id=session.chat_id,
                                     timeout_s=remaining_timeout_s,
                                     response_language=response_language,
                                     emit_text=emit_text,
@@ -1579,7 +1482,6 @@ class ChatStreamingMixin:
                                     user_question=question,
                                     augmented_question=augmented_question,
                                     mode=mode,
-                                    thread_id=session.chat_id,
                                     response_language=response_language,
                                 ),
                                 timeout_s=direct_timeout,
@@ -1593,12 +1495,6 @@ class ChatStreamingMixin:
                                     "reason": "instant_direct",
                                 },
                                 "subject_route": subject_route_meta,
-                                "upgraded": False,
-                                "upgrade_reason": "",
-                                "instant_review": {
-                                    "heuristic": "",
-                                    "review": "direct_answer",
-                                },
                             }
                             workflow_end("answer_generate", "LLM 直答", "回答生成完成")
                     await finish_graph_update()
@@ -1662,9 +1558,6 @@ class ChatStreamingMixin:
                         "elapsed_ms": str(elapsed_ms),
                         "route": None,
                         "subject_route": subject_route_meta,
-                        "upgraded": False,
-                        "upgrade_reason": "",
-                        "instant_review": None,
                         "retrieval_used": retrieval_used,
                         "retrieval_gate_result": retrieval_gate_result_label(),
                         "retrieval_gate_confidence": retrieval_gate_confidence,
@@ -1759,9 +1652,6 @@ class ChatStreamingMixin:
                     "message_details": message_details,
                     "route": result.get("route"),
                     "subject_route": result.get("subject_route"),
-                    "upgraded": bool(result.get("upgraded", False)),
-                    "upgrade_reason": result.get("upgrade_reason", ""),
-                    "instant_review": result.get("instant_review"),
                     "retrieval_used": retrieval_used,
                     "retrieval_gate_result": retrieval_gate_result_label(),
                     "retrieval_gate_confidence": retrieval_gate_confidence,

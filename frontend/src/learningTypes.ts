@@ -573,7 +573,7 @@ export interface StudyPlan {
     predictions: Array<{title: string; prediction: string}>;
     followups: Array<{attempt_id: string; submission_number: number; passed: boolean; independent_new_question: boolean; error?: string}>;
   }>;
-  ai_plan: { analysis: string; model: string; created_at: number } | null;
+  ai_plan: { analysis: string; available_minutes: number; model: string; created_at: number } | null;
   ai_stale: boolean;
   subject_id: LearningSubject;
   profile: { minutes: number; chapter_id: string; configured: boolean };

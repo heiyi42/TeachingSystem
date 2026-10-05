@@ -6,10 +6,98 @@ from unittest.mock import AsyncMock, patch
 
 import agenticRAG.agentic_answer as agentic_answer_module
 import agenticRAG.agentic_nodes as agentic_nodes_module
-import agenticRAG.instant_answer as instant_answer_module
+from agenticRAG.agentic_schema import EvidenceCheck
 
 
 class AgenticAnswerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_evidence_review_checks_content_even_for_long_success_results(self):
+        for status in ("success", "unknown"):
+            for sufficient in (False, True):
+                with self.subTest(status=status, sufficient=sufficient):
+                    evidence = "家庭菜谱：清洗蔬菜后加水煮熟。" * 30
+                    judge = AsyncMock(
+                        return_value=EvidenceCheck(
+                            sufficient=sufficient,
+                            reason="模型评审结论",
+                        )
+                    )
+                    state = {
+                        "sub_questions": [
+                            {"id": "sq1", "question": "LRU 如何选择淘汰页？"}
+                        ],
+                        "subquery_results": [
+                            {
+                                "sub_question_id": "sq1",
+                                "subject_id": "operating_systems",
+                                "query_status": status,
+                                "answer": evidence,
+                            }
+                        ],
+                        "query_attempt": 0,
+                    }
+                    with (
+                        patch.object(agentic_nodes_module, "_judge_evidence", judge),
+                        patch.object(agentic_nodes_module, "COMPLEX_MAX_RETRY", 1),
+                    ):
+                        result = await agentic_nodes_module.judge_subquestion_results(
+                            state
+                        )
+                        self.assertEqual(result["needs_retry"], not sufficient)
+                        self.assertEqual(
+                            result["sub_questions"][0]["sufficient"], str(sufficient)
+                        )
+                        self.assertIn(evidence, judge.await_args.args[2])
+                        judge.assert_awaited_once()
+                        if not sufficient:
+                            exhausted = (
+                                await agentic_nodes_module.judge_subquestion_results(
+                                    {**state, "query_attempt": 1}
+                                )
+                            )
+                            self.assertFalse(exhausted["needs_retry"])
+                            self.assertEqual(
+                                exhausted["insufficient_subquestion_ids"], ["sq1"]
+                            )
+
+    async def test_empty_and_failed_retrieval_do_not_call_evidence_model(self):
+        for status, answer in (
+            ("success", ""),
+            ("failure", "查询失败"),
+            ("unknown", ""),
+        ):
+            with (
+                self.subTest(status=status),
+                patch.object(
+                    agentic_nodes_module, "_judge_evidence", new_callable=AsyncMock
+                ) as judge,
+            ):
+                result = await agentic_nodes_module.judge_subquestion_results(
+                    {
+                        "sub_questions": [{"id": "sq1", "question": "LRU？"}],
+                        "subquery_results": [
+                            {
+                                "sub_question_id": "sq1",
+                                "query_status": status,
+                                "answer": answer,
+                            }
+                        ],
+                    }
+                )
+                self.assertEqual(result["sub_questions"][0]["sufficient"], "False")
+                judge.assert_not_awaited()
+
+    def test_brief_answer_prompt_does_not_force_sections(self):
+        prompt = agentic_nodes_module.build_final_answer_prompt(
+            {
+                "question": "一句话解释 LRU",
+                "answer_style_instruction": "一句话回答，不套用固定章节。",
+            }
+        )
+        self.assertIn("一句话回答，不套用固定章节", prompt)
+        self.assertNotIn("必须优先使用这里列出的可见一级标题", prompt)
+        self.assertNotIn("的标题组织", prompt)
+        self.assertIn("不得编造出处", prompt)
+
     async def test_run_question_plan_state_requires_selected_course(self) -> None:
         with self.assertRaisesRegex(ValueError, "selected course"):
             await agentic_answer_module.run_question_plan_state("测试问题")
@@ -65,10 +153,10 @@ class AgenticAnswerTests(unittest.IsolatedAsyncioTestCase):
             state: dict[str, object]
         ) -> dict[str, object]:
             self.assertEqual(state["question"], "测试问题")
-            self.assertEqual(state["requested_mode"], "deepsearch")
+            self.assertEqual(
+                state["allowed_subject_ids"], ["C_program", "operating_systems"]
+            )
             return {
-                "requested_mode": "deepsearch",
-                "effective_strategy": "deep",
                 "sub_questions": [
                     {
                         "id": "sq1",
@@ -282,7 +370,6 @@ class AgenticAnswerTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(query_rounds, [0, 1])
-        self.assertEqual(state["requested_mode"], "deepsearch")
         self.assertEqual(state["query_attempt"], 1)
         self.assertEqual(state["sub_questions"][0]["used_question"], "Q1-改写")
         self.assertEqual(
@@ -290,27 +377,3 @@ class AgenticAnswerTests(unittest.IsolatedAsyncioTestCase):
             ["C_program", "operating_systems"],
         )
         self.assertEqual(state["subquery_results"][0]["answer"], "第二轮结果")
-
-    async def test_instant_calls_llm_without_retrieval(self):
-        from langchain_core.messages import AIMessageChunk
-        from unittest.mock import Mock
-
-        async def chunks(messages):
-            self.assertIn("测试", str(messages))
-            yield AIMessageChunk(content="第一段")
-            yield AIMessageChunk(content=[{"type": "text", "text": "第二段"}])
-
-        with (
-            patch.object(instant_answer_module, "llm", Mock(astream=chunks)),
-            patch(
-                "agenticRAG.agentic_runtime.get_rag",
-                new=AsyncMock(side_effect=AssertionError("不应检索")),
-            ) as get_rag,
-        ):
-            result = await instant_answer_module.answer_instant_stream("测试")
-            self.assertEqual(
-                [part async for part in result["response_iterator"]],
-                ["第一段", "第二段"],
-            )
-        get_rag.assert_not_awaited()
-        self.assertEqual(result["route_mode"], "direct")

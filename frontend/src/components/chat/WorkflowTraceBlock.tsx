@@ -42,34 +42,20 @@ interface FlowTemplate {
 
 type TraceMode = ModeId;
 
-const FLOW_TEMPLATES: Record<TraceMode, FlowTemplate> = {
-  instant: {
-    title: "Instant",
-    summary: "模型直答",
-    rows: [
-      [
-        start("用户问题"),
-        edge(),
-        node("instant_answer", "LLM 直答", "结合会话上下文直接流式回答，不检索知识库。耗时为本次回答生成的总时间。", ["answer_generate"], [], "wide")
-      ]
-    ]
-  },
-  deepsearch: {
-    title: "DeepSearch",
-    summary: "课程知识库检索",
-    rows: [[
-      start("用户问题"),
-      edge(),
-      node("deepsearch_plan", "拆解问题", "将问题拆成可检索的子问题。", ["deepsearch_plan"]),
-      edge(),
-      node("deepsearch_retrieve", "课程内检索", "在所选课程知识库内并行检索子问题。", ["deepsearch_retrieve"]),
-      edge(),
-      node("deepsearch_review", "证据评审", "检查证据是否足以回答问题。", ["deepsearch_review"]),
-      edge(),
-      node("answer_generate", "生成回答", "综合检索证据，流式生成回答。", ["answer_generate", "final_response"])
-    ]]
-
-  }
+const DEEPSEARCH_FLOW: FlowTemplate = {
+  title: "DeepSearch",
+  summary: "课程知识库检索",
+  rows: [[
+    start("用户问题"),
+    edge(),
+    node("deepsearch_plan", "拆解问题", "将问题拆成可检索的子问题。", ["deepsearch_plan"]),
+    edge(),
+    node("deepsearch_retrieve", "课程内检索", "在所选课程知识库内并行检索子问题。", ["deepsearch_retrieve"]),
+    edge(),
+    node("deepsearch_review", "证据评审", "检查证据是否足以回答问题。", ["deepsearch_review"]),
+    edge(),
+    node("answer_generate", "生成回答", "综合检索证据，流式生成回答。", ["answer_generate", "final_response"])
+  ]]
 };
 
 const retryNode = node("deepsearch_retry", "改写问题", "改写证据不足的子问题，在所选课程内补充检索后重新评审。", ["deepsearch_retry"]);
@@ -77,9 +63,10 @@ const retryNode = node("deepsearch_retry", "改写问题", "改写证据不足�
 export function WorkflowTraceBlock({ details }: { details?: ExplainabilityDetails }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const mode = normalizeMode(details?.modeUsed || details?.mode);
-  const template = FLOW_TEMPLATES[mode];
+  const template = DEEPSEARCH_FLOW;
   const stepMap = useMemo(() => new Map((details?.workflowSteps || []).map((step) => [step.nodeId, step])), [details?.workflowSteps]);
-  const selectedNode = [...template.rows.flat(), ...(mode === "deepsearch" ? [retryNode] : [])]
+  if (mode !== "deepsearch") return null;
+  const selectedNode = [...template.rows.flat(), retryNode]
     .find((item): item is FlowNode => "id" in item && item.id === selectedId);
   const selectedSteps = selectedNode
     ? selectedNode.stepIds
@@ -99,7 +86,6 @@ export function WorkflowTraceBlock({ details }: { details?: ExplainabilityDetail
           {details?.responseTiming && (
             <div className="flow-summary" title="服务端从开始处理到答案生成完成的计时，不含会话存储和网络传输；评审仅统计本次实际执行的步骤。">
               首段文字 {formatOptionalDuration(details.responseTiming.firstTextMs ?? undefined)}
-              {typeof details.responseTiming.reviewMs === "number" && ` · 评审 ${formatDuration(details.responseTiming.reviewMs)}`}
               {` · 回答总耗时 ${formatDuration(details.responseTiming.totalMs)}`}
             </div>
           )}
@@ -132,22 +118,19 @@ export function WorkflowTraceBlock({ details }: { details?: ExplainabilityDetail
               )}
             </div>
           ))}
-          {mode === "deepsearch" ? (
-            <div className="flow-retry-branch">
-              <span>证据不足时</span>
-              <FlowNodeButton details={details} isSelected={selectedId === "deepsearch_retry"}
-                node={retryNode} onClick={() => setSelectedId(value => value === "deepsearch_retry" ? null : "deepsearch_retry")}
-                stepMap={stepMap} />
-              <span>补检索后重新评审</span>
-            </div>
-          ) : null}
+          <div className="flow-retry-branch">
+            <span>证据不足时</span>
+            <FlowNodeButton details={details} isSelected={selectedId === "deepsearch_retry"}
+              node={retryNode} onClick={() => setSelectedId(value => value === "deepsearch_retry" ? null : "deepsearch_retry")}
+              stepMap={stepMap} />
+            <span>补检索后重新评审</span>
+          </div>
         </div>
       </div>
       {selectedNode ? (
         <div className="trace-detail">
           <div className="font-semibold text-stone-900">{selectedNode.label}</div>
           <p className="mt-1 text-sm leading-6 text-stone-600">{selectedNode.detail}</p>
-          <InstantNodeDetail details={details} node={selectedNode} />
           <DeepSearchNodeDetail details={details} node={selectedNode} />
           {selectedSteps.length ? (
             <div className="mt-3 grid gap-2 text-sm text-stone-600">
@@ -198,67 +181,6 @@ function FlowNodeButton({
         {duration !== null ? ` · ${formatDuration(duration)}` : ""}
       </span>
     </button>
-  );
-}
-
-interface TraceDetailRow {
-  label: string;
-  value: string;
-}
-
-function InstantNodeDetail({
-  details,
-  node
-}: {
-  details?: ExplainabilityDetails;
-  node: FlowNode;
-}) {
-  const effectiveDetails = mergeStepDetails(details, node);
-  if (normalizeMode(effectiveDetails?.mode) !== "instant") return null;
-  if (node.id !== "instant_answer") return null;
-  return (
-    <SimpleTraceDetail
-      rows={[
-        { label: "执行路径", value: "直接调用模型" },
-        { label: "回答依据", value: "会话上下文与模型已有知识" },
-        { label: "课程检索", value: "未执行" },
-        { label: "输出方式", value: "流式输出" }
-      ]}
-      title="Instant 直答"
-    />
-  );
-}
-
-function SimpleTraceDetail({
-  pills,
-  rows,
-  title
-}: {
-  pills?: string[];
-  rows: TraceDetailRow[];
-  title: string;
-}) {
-  return (
-    <div className="deeptrace-list">
-      <div className="deeptrace-item">
-        <div className="deeptrace-item-title">{title}</div>
-        {rows.map((row) => (
-          <div className="trace-detail-row" key={row.label}>
-            <span>{row.label}：</span>
-            {row.value}
-          </div>
-        ))}
-        {pills?.length ? (
-          <div className="deeptrace-pills">
-            {pills.map((pill) => (
-              <span className="deeptrace-pill" key={pill}>
-                {pill}
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </div>
   );
 }
 
@@ -488,34 +410,6 @@ function subjectLabel(subjectId?: string): string {
 
 function formatOptionalDuration(durationMs: number | undefined): string {
   return typeof durationMs === "number" && durationMs >= 0 ? formatDuration(durationMs) : "未记录";
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function resolveStepDetails(
-  details: ExplainabilityDetails | undefined,
-  node: FlowNode
-): Record<string, unknown> | undefined {
-  const stepIds = new Set([node.id, ...node.stepIds]);
-  const step = details?.workflowSteps?.find((item) => stepIds.has(item.nodeId));
-  return isPlainRecord(step?.details) ? step.details : undefined;
-}
-
-function mergeStepDetails(
-  details: ExplainabilityDetails | undefined,
-  node: FlowNode
-): ExplainabilityDetails | undefined {
-  const stepDetails = resolveStepDetails(details, node);
-  if (!details || !stepDetails) return details;
-  const merged: ExplainabilityDetails = {
-    ...details,
-    deepsearchTrace: isPlainRecord(stepDetails.deepsearchTrace)
-      ? (stepDetails.deepsearchTrace as unknown as DeepSearchTrace)
-      : details.deepsearchTrace
-  };
-  return merged;
 }
 
 function resolveDeepSearchTrace(

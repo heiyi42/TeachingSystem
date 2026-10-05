@@ -3,6 +3,8 @@ import subprocess
 import sys
 import unittest
 from unittest.mock import patch
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from agenticRAG.workflow_checkpoint import checkpoint_database_path
 
 from tests.learning import test_learning_path
 from tests.learning import test_learning_dialogue
@@ -17,6 +19,30 @@ from webapp_core.runtime.workflow_runs import WorkflowRuns
 
 class LearningCheckpointTests(unittest.IsolatedAsyncioTestCase):
     setUp = test_learning_path.LearningPathTests.setUp
+
+    async def test_forgotten_memory_invalidates_saved_tutoring_context_before_model_call(
+        self,
+    ):
+        store = test_ai_learning_plan.AIPlanTests.publish_memory(self)
+        attempt = self.service.start("c_pointer_01")
+        flow = self.workflow()
+        model = self.model("learning_dialogue")
+        model.ainvoke.side_effect = TimeoutError()
+        with self.assertRaises(TimeoutError):
+            await flow.execute(
+                "learning_dialogue", attempt["id"], {"action": "start"}, model
+            )
+        run = flow.status("learning_dialogue", attempt["id"])
+        store.settings("alice", forget=True)
+        self.assertEqual(
+            flow.status("learning_dialogue", attempt["id"])["status"], "stale"
+        )
+        model = self.model("learning_dialogue")
+        with self.assertRaises(LearningConflict):
+            await flow.execute(
+                "learning_dialogue", attempt["id"], {"resume_run_id": run["id"]}, model
+            )
+        model.ainvoke.assert_not_awaited()
 
     def workflow(self, learning=None):
         return LearningWorkflow(
@@ -140,6 +166,70 @@ class LearningCheckpointTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(writes), 1)
             if kind == "learning_dialogue":
                 self.assertEqual(result["dialogue"]["revision"], 1)
+
+    async def test_compact_validated_state_resumes_before_save_without_regeneration(
+        self,
+    ):
+        attempt = self.service.start("dh_01")
+        flow = self.workflow()
+        for kind, target, data, method in [
+            ("learning_dialogue", attempt["id"], {"action": "start"}, "update"),
+            ("learning_plan", "C_program", {}, "ai_study_plan"),
+        ]:
+            with self.subTest(kind=kind):
+                original = getattr(self.service.store, method)
+
+                def fail_before_save(*args, **kwargs):
+                    if method == "update" or len(args) > 1:
+                        raise RuntimeError("interrupted before save")
+                    return original(*args, **kwargs)
+
+                model = self.model(kind)
+                with patch.object(
+                    self.service.store, method, side_effect=fail_before_save
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError, "interrupted before save"
+                    ):
+                        await flow.execute(kind, target, data, model)
+                model.ainvoke.assert_awaited_once()
+                run = flow.status(kind, target)
+                async with AsyncSqliteSaver.from_conn_string(
+                    str(checkpoint_database_path(self.path.with_name("runs.sqlite3")))
+                ) as saver:
+                    checkpoint = await saver.aget(
+                        {
+                            "configurable": {
+                                "thread_id": f"{run['id']}:{kind}",
+                                "checkpoint_ns": "",
+                            }
+                        }
+                    )
+                state = checkpoint["channel_values"]["__root__"]
+                self.assertFalse(
+                    {"context", "prompt", "content", "raw", "answer"} & state.keys()
+                )
+                if kind == "learning_plan":
+                    self.assertEqual(set(state["snapshot"]), {"signature"})
+                    self.assertEqual(
+                        set(state["data"]), {"analysis", "available_minutes"}
+                    )
+                else:
+                    self.assertEqual(set(state["source"]), {"updated_at"})
+                    self.assertIn("memory_version", state)
+                model = self.model(kind)
+                model.ainvoke.side_effect = AssertionError(
+                    "validated generation must not repeat"
+                )
+                result = await flow.execute(
+                    kind, target, {"resume_run_id": run["id"]}, model
+                )
+                model.ainvoke.assert_not_awaited()
+                self.assertEqual(flow.status(kind, target)["status"], "done")
+                if kind == "learning_dialogue":
+                    self.assertEqual(result["dialogue"]["revision"], 1)
+                else:
+                    self.assertTrue(result["ai_plan"]["tasks"])
 
     async def test_concurrent_owner_and_old_run_boundaries(self):
         attempt = self.service.start("dh_01")

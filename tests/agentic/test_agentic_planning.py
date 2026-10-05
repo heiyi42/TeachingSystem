@@ -5,7 +5,6 @@ import unittest
 from unittest.mock import patch
 
 import agenticRAG.agentic_nodes as nodes
-from agenticRAG.agentic_config import COMPLEX_MAX_RETRY, SIMPLE_MAX_RETRY
 from agenticRAG.agentic_schema import SubQuestionQueryPlan, SubQuestionRewrite
 
 
@@ -55,11 +54,13 @@ class AgenticPlanningTests(unittest.TestCase):
 
         with patch.object(nodes, "llm_subquestion_plan_struct", fake_planner):
             result = nodes.build_global_subquestion_plan(
-                {"question": "复杂问题", "requested_mode": "deepsearch"}
+                {
+                    "question": "复杂问题",
+                    "allowed_subject_ids": ["C_program", "operating_systems"],
+                }
             )
 
-        self.assertEqual(result["requested_mode"], "deepsearch")
-        self.assertEqual(result["effective_strategy"], "deep")
+        self.assertIn("所选课程：C_program, operating_systems", fake_planner.prompts[0])
         self.assertEqual(len(result["sub_questions"]), 4)
         self.assertEqual(
             [item["query_mode"] for item in result["sub_questions"]],
@@ -73,25 +74,6 @@ class AgenticPlanningTests(unittest.TestCase):
         )
         self.assertEqual(result["subquery_tasks"], [])
         self.assertEqual(result["subquery_results"], [])
-        self.assertIn("deepsearch", result["planning_reason"])
-
-    def test_allowed_retry_budget_prefers_effective_strategy(self) -> None:
-        self.assertEqual(
-            nodes._allowed_retry_budget(
-                {"requested_mode": "deepsearch", "question_complexity": ""}
-            ),
-            COMPLEX_MAX_RETRY,
-        )
-        self.assertEqual(
-            nodes._allowed_retry_budget(
-                {
-                    "requested_mode": "deepsearch",
-                    "question_complexity": "",
-                    "effective_strategy": "simple",
-                }
-            ),
-            SIMPLE_MAX_RETRY,
-        )
 
     def test_rewrite_insufficient_subquestions_calls_llm_rewriter(self) -> None:
         fake_rewriter = _FakeAsyncStructuredInvoker(

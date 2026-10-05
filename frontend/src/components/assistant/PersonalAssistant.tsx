@@ -30,7 +30,7 @@ export interface AssistantView {
   memory_status: "ready" | "updating" | "paused" | "failed";
   memory_error: string | null;
   messages: { id: string; role: string; content: string; status: string; created: number }[];
-  memories: { id: string; content: string; temporal?: string; sources: { id: string; text: string; timestamp?: string }[] }[];
+  memories: { id: string; content: string; temporal?: string; sources: { id: string; text: string; timestamp?: string; timestamp_label?: string | null }[] }[];
 }
 
 export function PersonalAssistant({ userId, user, active, onDirtyChange, onOpen, onOpenAttempt }: {
@@ -135,7 +135,7 @@ export function PersonalAssistant({ userId, user, active, onDirtyChange, onOpen,
         {data && !data.memories.length && <p>还没有整理好的记忆。整理完成后会显示在这里。</p>}
         {data?.memories.map(memory => <article key={memory.id}>
           <p>{memory.content}</p>{memory.temporal && <small>{memory.temporal}</small>}
-          <details><summary>查看来源</summary>{memory.sources.map(source => <p key={source.id}>{source.timestamp && <small>{source.timestamp}<br /></small>}{source.text}</p>)}</details>
+          <details><summary>查看来源</summary>{memory.sources.map(source => <p key={source.id}>{source.timestamp_label && <small>{source.timestamp_label}<br /></small>}{source.text}</p>)}</details>
           <button className="ghost-action" disabled={busy} onClick={() => {
             if (window.confirm("删除此记忆及其来源记录，并清空当前助理对话，避免旧上下文再次带回它。同一来源产生的其他记忆也会移除。")) void action(() => api.assistantForget(memory.id));
           }}>删除来源与记忆</button>

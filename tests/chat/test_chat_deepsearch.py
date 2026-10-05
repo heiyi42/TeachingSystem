@@ -18,7 +18,6 @@ class ChatDeepSearchTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(question=question):
                 self.assertEqual(ChatService._response_language_from_question(question), expected)
 
-
     async def test_brief_request_keeps_necessary_evidence_without_forced_outline(self):
         service = self._build_service()
         question = "根据课程资料简短解释指针，并给出出处。"
@@ -37,7 +36,6 @@ class ChatDeepSearchTests(unittest.IsolatedAsyncioTestCase):
         await service._run_multi_subject_deep_stream(
             user_question=question,
             question=question,
-            thread_id="test",
             timeout_s=30,
             subject_ids=["C_program"],
         )
@@ -47,7 +45,6 @@ class ChatDeepSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("真实检索出处", style)
         self.assertNotIn("## 扩展", style)
         self.assertEqual(service._requested_brief_style("不要简短回答，请详细讲解"), "")
-
 
     @staticmethod
     def _build_service() -> ChatService:
@@ -61,7 +58,6 @@ class ChatDeepSearchTests(unittest.IsolatedAsyncioTestCase):
             for subject_id, label in ChatService.SUBJECT_LABELS.items()
         }
         return service
-
 
     async def test_run_multi_subject_deep_stream_uses_subquestion_routed_chain(
         self,
@@ -85,7 +81,6 @@ class ChatDeepSearchTests(unittest.IsolatedAsyncioTestCase):
         result = await service._run_multi_subject_deep_stream(
             user_question="解释栈溢出为什么同时和 C、OS、安全有关",
             question="解释栈溢出为什么同时和 C、OS、安全有关",
-            thread_id="thread-1",
             timeout_s=12,
             subject_ids=["C_program", "operating_systems"],
             response_language="zh",
@@ -129,7 +124,6 @@ class ChatDeepSearchTests(unittest.IsolatedAsyncioTestCase):
         result = await service._run_multi_subject_deep_stream(
             user_question="空指针是什么",
             question="空指针是什么",
-            thread_id="thread-1",
             timeout_s=12,
             subject_ids=["C_program"],
             response_language="zh",
@@ -165,7 +159,6 @@ class ChatDeepSearchTests(unittest.IsolatedAsyncioTestCase):
             requested_subjects=None,
             user_question="解释这道综合题",
             augmented_question="解释这道综合题",
-            thread_id="thread-1",
             timeout_s=12,
             response_language="zh",
         )
@@ -197,7 +190,6 @@ class ChatDeepSearchTests(unittest.IsolatedAsyncioTestCase):
             requested_subjects=["C_program"],
             user_question="解释指针",
             augmented_question="解释指针",
-            thread_id="thread-1",
             timeout_s=12,
             response_language="zh",
         )
@@ -213,7 +205,6 @@ class ChatDeepSearchTests(unittest.IsolatedAsyncioTestCase):
                 subject_route={},
                 user_question="问题",
                 augmented_question="问题",
-                thread_id="test",
                 timeout_s=10,
             )
 

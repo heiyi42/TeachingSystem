@@ -79,6 +79,7 @@ class LearningMemoryTests(unittest.TestCase):
                 return_value=SimpleNamespace(
                     content=json.dumps(
                         {
+                            "available_minutes": snapshot["profile"]["minutes"],
                             "analysis": "先根据现有预测核对基础，再通过后续作答检验。",
                             "tasks": [
                                 {

@@ -4,6 +4,8 @@ import asyncio
 import copy
 import json
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from langgraph.graph import END, START, StateGraph
 from agenticRAG.workflow_checkpoint import checkpoint_run, invoke_workflow
@@ -11,6 +13,9 @@ from agenticRAG.workflow_checkpoint import checkpoint_run, invoke_workflow
 from webapp_core.learning.learning_service import ERROR_LABELS, LearningConflict
 from webapp_core.learning.learning_memory import learning_memories
 from webapp_core.learning.learning_path import LearningPathService
+from webapp_core.assistant.assistant_memory import retrieve
+from webapp_core.assistant.assistant_store import AssistantStore
+from webapp_core.assistant.assistant_prompts import STS_ANSWER_GUIDANCE
 
 
 class LearningDialogueService:
@@ -71,9 +76,33 @@ class LearningDialogueService:
             turns = session["turns"]
             if action == "answer":
                 turns[-1]["answer"] = answer.strip()
-            context_subject = self.learning._exercise(source)["subject_id"]
+            exercise = self.learning._exercise(source)
+            context_subject = exercise["subject_id"]
+            worked_example = None
+            if action == "answer" and exercise["kind"] == "page_replacement":
+                # Use different pages and a short sequence, never the current answer.
+                page = max(exercise["parameters"]["sequence"]) + 1
+                parameters = {"frames": 2, "sequence": [page, page + 1, page, page + 2]}
+                worked_example = {
+                    "algorithm": exercise["algorithm"],
+                    "parameters": parameters,
+                    "solution": self.learning._solve(
+                        {**exercise, "parameters": parameters}
+                    ),
+                }
+            owner = self.learning.store.owner_id
+            personal = (
+                AssistantStore(self.learning.store.path).view(owner) if owner else None
+            )
+            personal_memories = []
+            if personal and personal["enabled"] and personal["snapshot"].get("claims"):
+                personal_memories = retrieve(
+                    personal["snapshot"],
+                    f"{exercise['subject_name']} {exercise['title']} 讲解偏好 学习偏好",
+                )
             context = {
-                "exercise": self.learning._exercise(source),
+                "exercise": exercise,
+                "worked_example": worked_example,
                 "draft": source["draft"],
                 "evidence": [
                     {"rows": s["rows"], "evaluation": s["evaluation"]}
@@ -91,6 +120,8 @@ class LearningDialogueService:
                     exclude_attempt=attempt_id,
                 )[:4],
                 "conversation": turns,
+                "personal_memories": personal_memories,
+                "current_time": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
                 "process_predictions": (source.get("walkthrough") or {}).get(
                     "steps", []
                 )[-6:],
@@ -116,28 +147,59 @@ class LearningDialogueService:
                 "只返回JSON，包含 hypothesis（待验证假设）、question（一个追问）、"
                 "next_step（回到当前题应检查的具体步骤），每项1至600字。"
                 "另外返回 explanation（不超过600字的简短对比讲解，使用不同于原题的小例子）、"
-                "focus_code（从focus_options选择最有证据支持的一项，无证据则空字符串）、"
+                "focus_code（从focus_options的键中选择最有证据支持的代码，不返回中文标签；无证据则空字符串）、"
                 "ready_to_verify（布尔值）。首次必须追问，explanation和focus_code为空，"
-                "ready_to_verify为false。学生回答后，结合回答修正假设并给出讲解；"
+                "ready_to_verify为false。conversation中已有学生answer时，结合回答修正假设，"
+                "explanation必须非空，针对概念差异给出不同于原题数值或变量的短例子；"
+                "即使还需要追问也要先讲解，不得因ready_to_verify为false省略。"
+                "学生表示不确定或明确暴露概念混淆时，讲解后引导回题核验，不要连续用同义问题追问。"
                 "信息足够或学生表示不确定时可设ready_to_verify为true，转入订正，"
                 "不要把假设称为已确认事实。final_round为true时停止追问，"
                 "给出简短讲解，question写请返回练习完成核验。"
+                "personal_memories 是带来源的个人记忆。仅把当前适用的学习偏好用于追问的呈现方式、例子和讲解详略；"
+                "喜欢先做题时先让学生预测一步，卡住后再给短例子；喜欢例子时优先使用直观情境或状态表。"
+                "偏好不能覆盖当前学生的明确请求、首次追问与后续讲解要求，也不能改变判题、辅助记录或掌握结论。"
+                "worked_example 非空时是求解器核验过的另一道小例子，讲解只使用其中的访问序列和结果，"
+                "不自行编造另一组页面或淘汰结论；根据逐步记录解释命中和置换，不透露当前练习完整答案。"
+                + STS_ANSWER_GUIDANCE
             )
-            return {**state, "context": context, "prompt": prompt}
+            return {
+                "action": action,
+                "source": {"updated_at": source["updated_at"]},
+                "session": session,
+                "context": context,
+                "prompt": prompt,
+                "memory_version": (
+                    (personal["enabled"], personal["epoch"], personal["version"])
+                    if personal
+                    else None
+                ),
+            }
 
         async def generate(state):
             context, prompt = state["context"], state["prompt"]
-            response = await asyncio.wait_for(
-                llm.ainvoke(
-                    [
-                        ("system", prompt),
-                        ("human", json.dumps(context, ensure_ascii=False)),
-                    ]
-                ),
-                timeout=45,
-            )
-            # Check format before checkpointing so invalid responses can be regenerated.
-            return await validate({**state, "content": response.content})
+            messages = [
+                ("system", prompt),
+                ("human", json.dumps(context, ensure_ascii=False)),
+            ]
+            # Both generations share one deadline; no state is saved before validation.
+            async with asyncio.timeout(45):
+                for attempt in range(2):
+                    response = await llm.ainvoke(messages)
+                    try:
+                        return await validate({**state, "content": response.content})
+                    except RuntimeError:
+                        if attempt:
+                            raise
+                        messages.append(
+                            (
+                                "human",
+                                "上次输出未通过格式校验，请根据同一证据重新返回规定的JSON对象。"
+                                "hypothesis、question、next_step必须非空；学生回答后explanation必须非空且包含短例子。"
+                                "focus_code只能是focus_options中的键或空字符串，ready_to_verify必须为布尔值。"
+                                "所有文本字段不超过600字，不返回其他内容。",
+                            )
+                        )
 
         async def validate(state):
             session = state["session"]
@@ -161,11 +223,12 @@ class LearningDialogueService:
             focus = result.get("focus_code", "")
             ready = result.get("ready_to_verify", False)
             if (
-                not isinstance(explanation, str) or len(explanation) > 600
+                not isinstance(explanation, str)
+                or len(explanation) > 600
                 or not isinstance(focus, str)
                 or (focus and focus not in state["context"]["focus_options"])
                 or type(ready) is not bool
-                or (ready and not explanation.strip())
+                or ((ready or state["action"] == "answer") and not explanation.strip())
             ):
                 raise RuntimeError("诊断响应无效")
             # A model cannot skip the student response or grade understanding.
@@ -179,13 +242,22 @@ class LearningDialogueService:
             else:
                 turns.append({"question": result["question"]})
             session["model"] = getattr(llm, "model_name", "configured")
-            return state
+            return {
+                "action": state["action"],
+                "source": {"updated_at": state["source"]["updated_at"]},
+                "session": session,
+                "memory_version": state["memory_version"],
+            }
 
         async def close(state):
             state["session"]["status"] = (
                 "verifying" if state["action"] == "verify" else "closed"
             )
-            return state
+            return {
+                "action": state["action"],
+                "source": {"updated_at": state["source"]["updated_at"]},
+                "session": state["session"],
+            }
 
         async def persist(state):
             action, source, session = (
@@ -217,9 +289,19 @@ class LearningDialogueService:
                     "revision": session["revision"],
                 }
 
-            state = self.learning.store.update(
-                attempt_id, save, guard=self.learning._guard("tutoring")
-            )
+            def guard(source, connection):
+                check = self.learning._guard("tutoring")
+                if check:
+                    check(source, connection)
+                if state.get("memory_version") is not None:
+                    row = connection.execute(
+                        "SELECT enabled,epoch,version FROM assistant_profiles WHERE owner=?",
+                        (self.learning.store.owner_id,),
+                    ).fetchone()
+                    if row is None or tuple(row) != tuple(state["memory_version"]):
+                        raise LearningConflict("个人记忆已更新，请重新继续诊断")
+
+            state = self.learning.store.update(attempt_id, save, guard=guard)
             return self.learning._public(state)
 
         graph = StateGraph(dict)

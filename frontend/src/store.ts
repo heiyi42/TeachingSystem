@@ -5,7 +5,6 @@ import type {
   ChatSession,
   DeepSearchTrace,
   ExplainabilityDetails,
-  AutoRouteTrace,
   GraphPayload,
   LocalSubgraph,
   ModeId,
@@ -149,15 +148,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
           createExplainability(state.preferredMode, state.preferredSubject, "streaming");
         const subjectRoute = isRecord(meta.subject_route) ? meta.subject_route : {};
         const detectedSubject = String(subjectRoute.primary_subject || "") || explainability.detectedSubject;
-        const requestKind =
-          meta.request_kind === "code_analysis" || meta.request_kind === "problem_tutoring"
-            ? meta.request_kind
-            : undefined;
         return {
           ...message,
           details: {
             ...(message.details || {}),
-            ...(requestKind ? { kind: requestKind } : {}),
             ...(typeof meta.workflow_run_id === "string" ? { workflow_run_id: meta.workflow_run_id } : {}),
             explainability: {
               ...explainability,
@@ -280,22 +274,10 @@ function normalizeExplainability(raw: Record<string, unknown>): ExplainabilityDe
         : undefined,
     retrievalGateReason:
       typeof raw.retrievalGateReason === "string" ? raw.retrievalGateReason : undefined,
-    autoRoute: isRecord(raw.autoRoute)
-      ? (raw.autoRoute as unknown as AutoRouteTrace)
-      : undefined,
-    autoTimings: isRecord(raw.autoTimings)
-      ? (raw.autoTimings as unknown as ExplainabilityDetails["autoTimings"])
-      : undefined,
     citations: isRecord(raw.citations) && Array.isArray(raw.citations.sources)
       ? (raw.citations as unknown as ExplainabilityDetails["citations"]) : undefined,
     responseTiming: isRecord(raw.responseTiming)
       ? (raw.responseTiming as unknown as ExplainabilityDetails["responseTiming"])
-      : undefined,
-    autoUpgraded: typeof raw.autoUpgraded === "boolean" ? raw.autoUpgraded : undefined,
-    autoUpgradeReason:
-      typeof raw.autoUpgradeReason === "string" ? raw.autoUpgradeReason : undefined,
-    instantReview: isRecord(raw.instantReview)
-      ? (raw.instantReview as Record<string, unknown>)
       : undefined,
     deepsearchTrace: isRecord(raw.deepsearchTrace)
       ? (raw.deepsearchTrace as unknown as DeepSearchTrace)

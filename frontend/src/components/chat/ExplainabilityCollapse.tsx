@@ -1,4 +1,4 @@
-import { Check, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useState } from "react";
 import type { ChatMessage } from "../../types";
 import { LocalKnowledgeGraphBlock } from "./LocalKnowledgeGraphBlock";
@@ -11,24 +11,9 @@ interface ExplainabilityCollapseProps {
 
 export function ExplainabilityCollapse({ message }: ExplainabilityCollapseProps) {
   const [open, setOpen] = useState(false);
-  const specialStatus = getSpecialModuleStatus(message);
   const details = message.details?.explainability;
-  const isInstant = (details?.modeUsed || details?.mode) !== "deepsearch";
 
-  if (specialStatus) {
-    return (
-      <section className={`special-explainability-status ${specialStatus.kind} ${specialStatus.done ? "done" : ""}`}>
-        {specialStatus.done ? (
-          <span className="special-status-check" aria-hidden="true">
-            <Check size={14} strokeWidth={3} />
-          </span>
-        ) : (
-          <span className="special-status-dot" aria-hidden="true" />
-        )}
-        <span>{specialStatus.label}</span>
-      </section>
-    );
-  }
+  if ((details?.modeUsed || details?.mode) !== "deepsearch") return null;
 
   const stepCount = new Set(details?.workflowSteps?.filter(step => ["deepsearch_plan", "deepsearch_retrieve", "deepsearch_review", "deepsearch_retry", "answer_generate"].includes(step.nodeId) && step.status !== "skipped" && step.status !== "pending").map(step => step.nodeId)).size;
   const graphCount = details?.localSubgraphs?.reduce((sum, graph) => sum + graph.nodes.length, 0) || 0;
@@ -39,9 +24,9 @@ export function ExplainabilityCollapse({ message }: ExplainabilityCollapseProps)
     <section className="explainability-box">
       <button className="explainability-toggle" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <span>
-          <span className="explainability-title">{isInstant ? "回答过程" : "检索与引用"}</span>
+          <span className="explainability-title">检索与引用</span>
           <span className="explainability-summary">
-            {isInstant ? "模型直答" : hasRuntimeData
+            {hasRuntimeData
               ? `${stepCount} 个节点 · ${graphCount} 个实体 · ${chunkCount} 条证据`
               : "本次回答暂无可解释信息"}
           </span>
@@ -51,51 +36,13 @@ export function ExplainabilityCollapse({ message }: ExplainabilityCollapseProps)
       {open ? (
         <div className="explainability-content">
           <WorkflowTraceBlock details={details} />
-          {!isInstant ? <>
-            <LocalKnowledgeGraphBlock
-              subgraphs={details?.localSubgraphs || []}
-              graphError={details?.graphError || ""}
-            />
-            <RetrievedChunksCollapse citations={details?.citations} />
-          </> : null}
+          <LocalKnowledgeGraphBlock
+            subgraphs={details?.localSubgraphs || []}
+            graphError={details?.graphError || ""}
+          />
+          <RetrievedChunksCollapse citations={details?.citations} />
         </div>
       ) : null}
     </section>
   );
-}
-
-function getSpecialModuleStatus(
-  message: ChatMessage
-): { kind: "code-analysis" | "problem-tutoring"; label: string; done: boolean } | null {
-  const kind = stringFromUnknown(message.details?.kind);
-  const route = recordFromUnknown(message.details?.route);
-  const routeChain = stringFromUnknown(route?.chain);
-  const meta = message.meta || "";
-  const status = message.details?.explainability?.status;
-  const isDone = status === "done";
-  if (status === "cancelled" || status === "error") return null;
-
-  if (kind === "code_analysis" || routeChain === "code_analysis" || meta.includes("代码分析")) {
-    return { kind: "code-analysis", label: isDone ? "分析完成" : "正在分析代码", done: isDone };
-  }
-
-  if (
-    kind === "problem_tutoring" ||
-    routeChain === "problem_tutoring" ||
-    meta.includes("题目辅导")
-  ) {
-    return { kind: "problem-tutoring", label: isDone ? "解题完成" : "正在分步解题", done: isDone };
-  }
-
-  return null;
-}
-
-function recordFromUnknown(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function stringFromUnknown(value: unknown): string {
-  return typeof value === "string" ? value : "";
 }

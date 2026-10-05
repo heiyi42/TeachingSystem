@@ -11,7 +11,11 @@ from agenticRAG.answer_evidence import (
     citation_result,
     load_query_evidence,
 )
-from agenticRAG.agentic_nodes import build_final_answer_prompt, _query_subquery_task
+from agenticRAG.agentic_nodes import (
+    build_final_answer_prompt,
+    _query_subquery_task,
+    query_subquestion_tasks,
+)
 from scripts.check_qa_sources import check_sources
 from webapp_core.runtime.workflow_runs import WorkflowRuns
 import tempfile
@@ -85,6 +89,44 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("wrong Chapter 04", prompt)
         self.assertNotIn("/private", prompt)
         self.assertEqual(row["evidence"][0]["source"], "Chapter_06.txt")
+        self.assertEqual(row["task_id"], "t")
+        self.assertEqual(row["sub_question_id"], "sq1")
+
+    async def test_failed_query_rows_keep_task_identity_and_failure_reason(self):
+        tasks = [
+            {"task_id": "missing", "sub_question_id": "sq1", "question": "Q"},
+            {
+                "task_id": "unavailable",
+                "sub_question_id": "sq2",
+                "subject_id": "missing_course",
+                "question": "Q",
+            },
+            {
+                "task_id": "exception",
+                "sub_question_id": "sq3",
+                "subject_id": "C_program",
+                "question": "Q",
+            },
+        ]
+        with patch(
+            "agenticRAG.agentic_nodes.get_rag",
+            AsyncMock(side_effect=RuntimeError("offline")),
+        ):
+            state = await query_subquestion_tasks(
+                {
+                    "subject_working_dirs": {"C_program": "test"},
+                    "subquery_tasks": tasks,
+                }
+            )
+        rows = state["subquery_results"]
+        self.assertEqual([r["task_id"] for r in rows], [t["task_id"] for t in tasks])
+        self.assertEqual([r["sub_question_id"] for r in rows], ["sq1", "sq2", "sq3"])
+        self.assertEqual([r["query_status"] for r in rows], ["failure"] * 3)
+        self.assertEqual(
+            [r["query_failure_reason"] for r in rows],
+            ["missing_subject", "missing_working_dir", "exception"],
+        )
+        self.assertEqual(answer_evidence(state), [])
 
     async def test_empty_graph_retrieval_uses_current_vector_chunks(self):
         text = "互斥、占有且等待、不可抢占、循环等待。"

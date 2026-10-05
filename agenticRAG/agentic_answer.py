@@ -33,7 +33,6 @@ async def run_question_plan_state(
 
     state: dict[str, Any] = {
         "question": question,
-        "requested_mode": requested_mode,
         "response_language": response_language,
     }
     if isinstance(allowed_subject_ids, list):
@@ -106,6 +105,6 @@ async def run_question_plan_state(
             state,
             recursion_limit=max(
                 32,
-                8 + 4 * max(cfg.MAX_RETRY, cfg.COMPLEX_MAX_RETRY, cfg.SIMPLE_MAX_RETRY),
+                8 + 4 * max(0, cfg.COMPLEX_MAX_RETRY),
             ),
         )

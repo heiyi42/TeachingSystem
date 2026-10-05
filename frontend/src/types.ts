@@ -108,21 +108,6 @@ export interface DeepSearchSubQuestion {
   chunkTopK?: number | null;
 }
 
-export interface DeepSearchRankedSubject {
-  subject: string;
-  label?: string;
-  score?: number;
-}
-
-export interface DeepSearchSubQuestionRoute {
-  subQuestionId: string;
-  primarySubject?: string;
-  primarySubjectLabel?: string;
-  targetSubjects: string[];
-  rankedSubjects: DeepSearchRankedSubject[];
-  reason?: string;
-}
-
 export interface DeepSearchReviewItem {
   subQuestionId: string;
   sufficient?: boolean | null;
@@ -142,7 +127,6 @@ export interface DeepSearchSubqueryTask {
 }
 
 export interface DeepSearchSubqueryResult {
-  resultId?: string;
   taskId?: string;
   subQuestionId: string;
   subjectId?: string;
@@ -180,41 +164,14 @@ export interface DeepSearchRetryRewrite {
   targetSubjectLabels?: string[];
 }
 
-export interface DeepSearchSubjectLock {
-  enabled: boolean;
-  subjectIds: string[];
-  subjectLabels?: string[];
-  reason?: string;
-}
-
 export interface DeepSearchTrace {
   subQuestions: DeepSearchSubQuestion[];
-  subQuestionRoutes: DeepSearchSubQuestionRoute[];
   subqueryTasks?: DeepSearchSubqueryTask[];
   subqueryResults?: DeepSearchSubqueryResult[];
   review: DeepSearchReviewItem[];
   retry: DeepSearchRetryInfo;
-  subjectLock: DeepSearchSubjectLock;
   finalAnswerPrompt?: string;
   finalAnswerPromptChars?: number | null;
-}
-
-export interface AutoRouteTrace {
-  chain?: string;
-  policy?: string;
-  reason?: string;
-  complexity?: string;
-  confidence?: number | string | null;
-  subjects?: string[];
-}
-
-export interface AutoTimings {
-  autoPlanMs?: number;
-  instantTrialMs?: number;
-  instantReviewMs?: number;
-  autoSecondSubjectMs?: number;
-  autoMergeReviewMs?: number;
-  deepsearchFallbackMs?: number;
 }
 
 export interface AnswerCitations {
@@ -229,7 +186,6 @@ export interface ExplainabilityDetails {
     firstTextMs: number | null;
     totalMs: number;
     outputMs: number | null;
-    reviewMs: number | null;
   };
   mode?: ModeId | string;
   modeUsed?: ModeId | string;
@@ -246,11 +202,6 @@ export interface ExplainabilityDetails {
   retrievalGateResult?: string;
   retrievalGateConfidence?: number | string | null;
   retrievalGateReason?: string;
-  autoRoute?: AutoRouteTrace;
-  autoTimings?: AutoTimings;
-  autoUpgraded?: boolean;
-  autoUpgradeReason?: string;
-  instantReview?: Record<string, unknown>;
   deepsearchTrace?: DeepSearchTrace;
 }
 

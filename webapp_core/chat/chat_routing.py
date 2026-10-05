@@ -9,8 +9,6 @@ from webapp_core.chat import auto_runtime as auto
 from webapp_core import config as cfg
 
 
-
-
 class ChatRoutingMixin:
     @classmethod
     def _subject_label(cls, subject_id: str) -> str:
@@ -28,14 +26,11 @@ class ChatRoutingMixin:
             }
         return catalog
 
-
-
     @classmethod
     def _rank_subject_scores(
         cls, scores: dict[str, float]
     ) -> list[tuple[str, float]]:
         return sorted(scores.items(), key=lambda item: (-item[1], item[0]))
-
 
     def _subject_route_from_scores(
         self,
@@ -50,13 +45,11 @@ class ChatRoutingMixin:
         second_score = ranked[1][1] if len(ranked) > 1 else 0.0
         cross_subject = primary_score >= 0.30 and second_score >= 0.30
         return {
-            "scores": scores,
             "ranked": ranked,
             "primary_subject": primary_subject,
             "cross_subject": cross_subject,
             "confidence": auto._clamp_confidence(confidence),
             "reason": reason,
-            "max_score": primary_score,
             "requested_subjects": list(requested_subjects or []),
         }
 
@@ -109,7 +102,6 @@ class ChatRoutingMixin:
                 normalized.append(subject_id)
         return normalized
 
-
     @staticmethod
     def _normalize_for_exact_match(text: str) -> str:
         value = str(text or "").strip()
@@ -161,7 +153,6 @@ class ChatRoutingMixin:
         user_question: str,
         augmented_question: str,
         mode: str,
-        thread_id: str,
         response_language: str = "zh",
         requested_subjects: list[str] | None = None,
     ) -> str:
@@ -179,7 +170,6 @@ class ChatRoutingMixin:
             f"回答语言要求：{self._response_language_instruction(response_language)}\n\n"
             f"当前模式：{mode}\n"
             f"课程范围：{scope or '未指定'}（仅作为理解问题的上下文，不代表已查询课程资料）\n"
-            f"thread_id：{thread_id}\n"
             f"用户问题：{user_question}\n"
             f"上下文增强问题：{augmented_question}"
         )

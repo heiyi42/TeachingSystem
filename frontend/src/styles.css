@@ -419,49 +419,6 @@ input {
   padding: 12px;
 }
 
-.special-explainability-status {
-  display: inline-flex;
-  width: fit-content;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: #f8faf9;
-  padding: 8px 12px;
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 760;
-}
-
-.special-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--accent);
-  box-shadow: 0 0 0 5px rgba(15, 118, 110, 0.1);
-  animation: pulse-dot 1.4s ease-in-out infinite;
-}
-
-.special-explainability-status.code-analysis .special-status-dot {
-  background: #f97316;
-  box-shadow: 0 0 0 5px rgba(249, 115, 22, 0.12);
-}
-
-.special-status-check {
-  display: grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  border-radius: 999px;
-  background: rgba(54, 94, 170, 0.12);
-  color: var(--accent);
-}
-
-.special-explainability-status.code-analysis.done .special-status-check {
-  background: rgba(249, 115, 22, 0.13);
-  color: #ea580c;
-}
-
 .trace-block {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -750,27 +707,6 @@ input {
   margin-bottom: 4px;
   color: var(--text);
   font-weight: 820;
-}
-
-.trace-detail-row span {
-  color: var(--text);
-  font-weight: 760;
-}
-
-.deeptrace-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 6px;
-}
-
-.deeptrace-pill {
-  border-radius: 999px;
-  background: #ecfdf5;
-  padding: 3px 7px;
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 760;
 }
 
 .deeptrace-empty {

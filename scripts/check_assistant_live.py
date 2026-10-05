@@ -53,6 +53,15 @@ def main():
             enqueue(
                 db, "synthetic-user", "synthetic-1", "我原来的计划是每天复习50分钟。"
             )
+        memory = STSMemory()
+        first_job = store.claim()
+        first_snapshot = await asyncio.wait_for(
+            memory.build("synthetic-user", first_job["events"], first_job["snapshot"]),
+            timeout=480,
+        )
+        if not store.publish(first_job, first_snapshot):
+            raise RuntimeError("Initial publication failed")
+        with closing(store.connect()) as db, db:
             enqueue(
                 db,
                 "synthetic-user",
@@ -60,12 +69,12 @@ def main():
                 "更正：这周每天只能复习25分钟，下周恢复每天50分钟。",
             )
         job = store.claim()
-        memory = STSMemory()
         snapshot = await asyncio.wait_for(
-            memory.build("synthetic-user", job["events"]), timeout=480
+            memory.build("synthetic-user", job["events"], job["snapshot"]), timeout=480
         )
         if not store.publish(job, snapshot):
             raise RuntimeError("Publication failed")
+
         # New retrieval call with no chat history simulates a new conversation.
         class CheckedEmbeddings(Embeddings):
             succeeded = False
@@ -95,6 +104,18 @@ def main():
             len(snapshot.get("vectors", {}).get(key, [])) == embeddings.dimension
             for key in snapshot.get("claims", {})
         )
+        incremental_ok = (
+            [event["id"] for event in job["events"]] == ["synthetic-2"]
+            and bool(first_snapshot.get("scopes"))
+            and set(first_snapshot["scopes"]) <= set(snapshot.get("scopes", {}))
+            and set(snapshot.get("events", {})) == {"synthetic-1", "synthetic-2"}
+        )
+        unrelated = await asyncio.to_thread(
+            retrieve,
+            snapshot,
+            "火星探测器使用什么燃料？",
+            embeddings,
+        )
         answer = await ModelProvider().generate(
             '仅依据下面的个人记忆，返回JSON {"daily_minutes":整数,"next_week_minutes":整数}。问题：这周和下周每天分别复习多少分钟？记忆：'
             + json.dumps(evidence, ensure_ascii=False)
@@ -109,13 +130,20 @@ def main():
         return {
             "live_test": (
                 "passed"
-                if recall_ok and temporary_ok and vector_ok and deletion_ok
+                if recall_ok
+                and temporary_ok
+                and vector_ok
+                and deletion_ok
+                and incremental_ok
+                and not unrelated
                 else "failed"
             ),
             "recall_current_constraint": recall_ok,
             "temporary_constraint_expires": temporary_ok,
             "live_embeddings": vector_ok,
             "deletion_blocks_old_job": deletion_ok,
+            "incremental_scope_update": incremental_ok,
+            "unrelated_query_rejected": not unrelated,
             "claims": len(snapshot.get("claims", {})),
         }
 
