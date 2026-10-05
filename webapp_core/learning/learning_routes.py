@@ -143,6 +143,11 @@ def learning_blueprint(service: LearningService, *, demo: bool = False) -> Bluep
     def get(attempt_id):
         return jsonify(current_service().get(attempt_id))
 
+    @blueprint.delete("/attempts/<attempt_id>")
+    def cancel(attempt_id):
+        current_service().store.cancel(attempt_id)
+        return jsonify({"deleted": True})
+
     @blueprint.put("/attempts/<attempt_id>/draft")
     def draft(attempt_id):
         return jsonify(current_service().save_draft(attempt_id, payload().get("rows")))
@@ -179,6 +184,10 @@ def learning_blueprint(service: LearningService, *, demo: bool = False) -> Bluep
         return jsonify(
             LearningPlanService(current_service()).configure(subject, payload())
         )
+
+    @blueprint.put("/plan/<subject>/skipped-point")
+    def skip_study_point(subject):
+        return jsonify(LearningPlanService(current_service()).skip_point(subject, payload()))
 
     @blueprint.post("/plan/<subject>/diagnostic")
     def begin_diagnostic(subject):

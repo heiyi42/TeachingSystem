@@ -317,10 +317,8 @@ def compute_crop_box(
     lines: list[TextLine],
     image_width: int,
     image_height: int,
-    page_width: float,
     page_height: float,
 ) -> dict[str, int | str | float]:
-    scale_x = image_width / float(page_width)
     scale_y = image_height / float(page_height)
     caption_y = caption.line.y
 
@@ -478,7 +476,6 @@ def main() -> None:
             continue
 
         page = reader.pages[caption_match.page_index]
-        page_width = float(page.mediabox.width)
         page_height = float(page.mediabox.height)
 
         page_image = render_page_image(reader, caption_match.page_index, pages_dir, args.force)
@@ -490,7 +487,6 @@ def main() -> None:
             lines=page_lines,
             image_width=image_width,
             image_height=image_height,
-            page_width=page_width,
             page_height=page_height,
         )
 

@@ -18,6 +18,7 @@ export function IdentityGate({
   const [username, setUsername] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [selectedRole, setSelectedRole] = useState<SchoolUser["role"] | "">("");
   const [error, setError] = useState("");
   const [demo, setDemo] = useState(false);
   const [section, setSection] = useState<"training" | "records">("training");
@@ -103,7 +104,7 @@ export function IdentityGate({
           try {
             const result = await api.signIn(
               setup ? "setup" : register ? "register" : "login",
-              { username, name, password },
+              { username, name, password, ...(!setup && !register && selectedRole ? { selected_role: selectedRole } : {}) },
             );
             clearWorkspace();
             setUser(result.user);
@@ -124,6 +125,15 @@ export function IdentityGate({
             首次使用，请在服务器本机设置管理员账号。管理员可以创建教师账号，并保留查看旧版共享记录的权限。
           </p>
         )}
+        {!setup && !register && <label>
+          身份
+          <select aria-label="身份" required value={selectedRole} onChange={event => setSelectedRole(event.target.value as SchoolUser["role"] | "")}>
+            <option value="" disabled>请选择身份</option>
+            <option value="teacher">老师</option>
+            <option value="student">学生</option>
+            <option value="admin">管理员</option>
+          </select>
+        </label>}
         <label>
           用户名
           <input

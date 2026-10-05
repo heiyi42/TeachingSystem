@@ -13,6 +13,7 @@ from langgraph.graph import END, START, StateGraph
 from agenticRAG.workflow_checkpoint import invoke_workflow
 
 from webapp_core.chat import auto_runtime as auto
+from webapp_core.chat.chat_routing import CHAT_ANSWER_PRESENTATION
 
 from agenticRAG.agentic_answer import run_question_plan_state
 from agenticRAG.agentic_nodes import (
@@ -129,30 +130,13 @@ class ChatRetrievalSupportMixin:
         *,
         llm_client: Any,
         prompt: str,
-        timeout_s: int,
+        timeout_s: int | None,
         emit_text: Callable[[str], None] | None = None,
-        flush_chars: int = 16,
         before_first_emit: Callable[[], Awaitable[None]] | None = None,
     ) -> str:
-        safe_timeout = max(1, int(timeout_s))
+        safe_timeout = max(1, int(timeout_s)) if timeout_s is not None else None
         chunks: list[str] = []
-        pending = ""
         first_emit_notified = False
-
-        async def _flush(force: bool = False) -> None:
-            nonlocal first_emit_notified
-            nonlocal pending
-            if not pending:
-                return
-            if not force and len(pending) < max(1, int(flush_chars)):
-                return
-            if emit_text is not None:
-                if not first_emit_notified:
-                    first_emit_notified = True
-                    if before_first_emit is not None:
-                        await before_first_emit()
-                emit_text(pending)
-            pending = ""
 
         async with asyncio.timeout(safe_timeout):
             async with aclosing(llm_client.astream(prompt)) as stream:
@@ -161,16 +145,12 @@ class ChatRetrievalSupportMixin:
                     if not text:
                         continue
                     chunks.append(text)
-                    pending += text
-                    if (
-                        not first_emit_notified
-                        or len(pending) >= max(1, int(flush_chars))
-                        or text.endswith(
-                            ("\n", "。", "！", "？", ".", "!", "?", "；", ";")
-                        )
-                    ):
-                        await _flush(force=True)
-            await _flush(force=True)
+                    if emit_text is not None:
+                        if not first_emit_notified:
+                            first_emit_notified = True
+                            if before_first_emit is not None:
+                                await before_first_emit()
+                        emit_text(text)
 
         return "".join(chunks).strip()
 
@@ -277,6 +257,7 @@ class ChatRetrievalSupportMixin:
             final_prompt = build_final_answer_prompt(state)
             if not str(final_prompt or "").strip():
                 raise ValueError("DeepSearch final answer prompt is empty")
+            final_prompt += "\n\n" + CHAT_ANSWER_PRESENTATION
             final_prompt_ms = int((time.perf_counter() - prompt_started) * 1000)
             final_prompt_state = {
                 **state,

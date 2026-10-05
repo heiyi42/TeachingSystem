@@ -305,7 +305,7 @@ export function AssignmentWorkspace({
       {(tasks.isLoading || stats.isLoading) && <p role="status">正在读取…</p>}
       <div hidden={Boolean(editing || detail)}>
       {preparation && teacher && classId && <LessonPlanWorkspace
-        key={classId} classId={classId} userId={user.id} onAssign={useLesson} onDirtyChange={setLessonDirty}
+        key={classId} classId={classId} courseId={classroom?.course_id || ""} userId={user.id} onAssign={useLesson} onDirtyChange={setLessonDirty}
         initialPlan={initialTeaching?.plan}
         onOpenTask={(id, student) => { run(() => open(id, student)); }}
       />}
@@ -335,10 +335,10 @@ export function AssignmentWorkspace({
             <p>涉及 {group.student_count} 名学生 · 首错出现 {group.occurrences} 次 · 最新提交仍出现该首错 {group.current_student_count} 人</p>
             <p>{group.teaching_advice}</p>
             <p>{group.practice_advice}</p>
-            {!!group.exercises.length && <ul>{group.exercises.map(exercise => <li key={exercise.id}>{exercise.title} · v{exercise.content_version}</li>)}</ul>}
+            {!!group.exercises.length && <ul>{group.exercises.map(exercise => <li key={exercise.id}>{exercise.title}</li>)}</ul>}
             <details><summary>查看 {group.evidence.length} 条作答证据</summary>
               <ul>{group.evidence.map(evidence => <li key={`${evidence.attempt_id}:${evidence.submission_number}`}>
-                <p>{evidence.student_name} · {evidence.task_title} · {evidence.exercise_title} · v{evidence.content_version}</p>
+                <p>{evidence.student_name} · {evidence.task_title} · {evidence.exercise_title}</p>
                 <p>第 {evidence.submission_number} 次提交 · {date(evidence.created_at)}{evidence.step != null && ` · 第 ${evidence.step} 步`}：{evidence.message}</p>
                 <button className="training-link" disabled={busy} onClick={() => run(() => open(evidence.task_id, evidence.student_id))}>查看完整作答</button>
               </li>)}</ul>
@@ -454,7 +454,7 @@ export function AssignmentWorkspace({
                       {q.title}
                     </td>
                     <td>
-                      {q.chapter_title} · v{q.content_version}
+                      {q.chapter_title}
                     </td>
                     <td>
                       {q.started} / {stats.data.member_count}
@@ -686,7 +686,7 @@ export function AssignmentWorkspace({
                     }
                   />
                   <span>
-                    {e.title} · {e.chapter_title} · v{e.content_version}
+                    {e.title} · {e.chapter_title}
                   </span>
                 </label>
               ))}
@@ -819,7 +819,7 @@ export function AssignmentWorkspace({
                   return (
                     <tr key={e.id}>
                       <td>
-                        {e.title} · v{e.content_version}
+                        {e.title}
                       </td>
                       <td>
                         {teacher && !studentId
@@ -1035,7 +1035,7 @@ export function AssignmentWorkspace({
               {detail.attempts.map((a) => (
                 <details key={a.id} className="task-evidence">
                   <summary>
-                    {a.exercise.title} · 作答证据 · v{a.content_version}
+                    {a.exercise.title} · 作答证据
                   </summary>
                   <p>
                     提示 {a.hint_count} 次 ·{" "}

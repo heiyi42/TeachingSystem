@@ -56,19 +56,6 @@ class ChatStreamingMixin:
             print(f"[WARN] 生成聊天标题失败: {e}")
         return self.store.fallback_chat_title(q, max_len=safe_max_len)
 
-    def _apply_fallback_chat_title(
-        self,
-        session: ChatSession,
-        question: str,
-    ) -> str:
-        safe_max_len = max(1, int(cfg.WEB_CHAT_TITLE_MAX_LEN))
-        fallback_title = self.store.fallback_chat_title(question, max_len=safe_max_len)
-        with session.lock:
-            if self.store.is_placeholder_title(session.title) and fallback_title:
-                session.title = fallback_title
-                session.updated_at = time.time()
-            return session.title
-
     def _schedule_chat_title_refinement(
         self,
         session: ChatSession,
@@ -79,37 +66,39 @@ class ChatStreamingMixin:
 
         safe_max_len = max(1, int(cfg.WEB_CHAT_TITLE_MAX_LEN))
         fallback_title = self.store.fallback_chat_title(question, max_len=safe_max_len)
+        with session.lock:
+            if (
+                session.turns
+                or not self.store.is_placeholder_title(session.title)
+                or session.title_generation_started
+            ):
+                return
+            session.title_generation_started = True
+            session.title_pending = True
+            session.title = fallback_title
+            session.updated_at = time.time()
+        self.store.persist_sessions_safely()
 
         async def refine_title() -> None:
-            generated_title = await self._agenerate_chat_title_from_first_question(
-                question
-            )
-            if not generated_title:
-                return
-
-            should_persist = False
-            with session.lock:
-                current_title = str(session.title or "").strip()
-                if current_title not in {
-                    fallback_title,
-                    generated_title,
-                } and not self.store.is_placeholder_title(current_title):
-                    return
-                if current_title != generated_title:
-                    session.title = generated_title
-                    session.updated_at = time.time()
+            try:
+                generated_title = await self._agenerate_chat_title_from_first_question(
+                    question
+                )
+                with session.lock:
+                    if session.title == fallback_title and generated_title:
+                        session.title = generated_title
+                        session.updated_at = time.time()
+            finally:
+                with session.lock:
+                    session.title_pending = False
+                    title = session.title
                     updated_at = session.updated_at
-                    should_persist = True
-                else:
-                    updated_at = session.updated_at
-
-            if should_persist:
                 self.store.persist_sessions_safely()
                 self._publish_event(
                     "title_updated",
                     {
                         "chat_id": session.chat_id,
-                        "title": generated_title,
+                        "title": title,
                         "updated_at": updated_at,
                     },
                 )
@@ -206,6 +195,7 @@ class ChatStreamingMixin:
             mode, cfg.INSTANT_QUERY_TIMEOUT_S
         )
         timeout_s = safe_int(payload.get("timeout"), default_timeout, floor=1)
+        explicit_timeout = "timeout" in payload
 
         def event_stream():
             request_started_at = time.perf_counter()
@@ -919,10 +909,8 @@ class ChatStreamingMixin:
                         response_language=response_language,
                     )
                 )
+                self._schedule_chat_title_refinement(session, question)
                 with session.lock:
-                    should_auto_rename = len(
-                        session.turns
-                    ) == 0 and self.store.is_placeholder_title(session.title)
                     augmented_question = (
                         question
                         if fast_result_bundle is not None
@@ -1243,7 +1231,7 @@ class ChatStreamingMixin:
                         remaining_timeout_s = int(
                             timeout_s - (time.perf_counter() - request_started_at)
                         )
-                        if remaining_timeout_s <= 0:
+                        if remaining_timeout_s <= 0 and (mode != "instant" or explicit_timeout):
                             raise TimeoutError("请求总超时预算已耗尽")
                         if (
                             retrieval_used
@@ -1468,13 +1456,6 @@ class ChatStreamingMixin:
                                 "LLM 直答",
                                 "结合会话上下文直接流式回答",
                             )
-                            direct_timeout = max(
-                                1,
-                                min(
-                                    remaining_timeout_s,
-                                    max(1, int(cfg.WEB_DIRECT_ANSWER_TIMEOUT_S)),
-                                ),
-                            )
                             answer = await self._stream_llm_text(
                                 llm_client=auto.auto_router_llm,
                                 prompt=self._build_direct_answer_prompt(
@@ -1484,7 +1465,7 @@ class ChatStreamingMixin:
                                     mode=mode,
                                     response_language=response_language,
                                 ),
-                                timeout_s=direct_timeout,
+                                timeout_s=None if mode == "instant" and not explicit_timeout else remaining_timeout_s,
                                 emit_text=emit_text,
                             )
                             result = {
@@ -1632,10 +1613,6 @@ class ChatStreamingMixin:
                         assistant_meta=assistant_meta,
                         message_details=message_details,
                     )
-
-                if should_auto_rename:
-                    self._apply_fallback_chat_title(session, question)
-                    self._schedule_chat_title_refinement(session, question)
 
                 self.store.persist_sessions_safely()
                 with session.lock:

@@ -57,6 +57,46 @@ class LearningTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.json)
         return response.json
 
+    def test_cancel_unsubmitted_attempt_removes_record_and_events(self):
+        attempt = self.start()
+        self.service.hint(attempt["id"], 1)
+        response = self.client.delete(f"/api/learning/attempts/{attempt['id']}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.service.progress()["records"], [])
+        with sqlite3.connect(self.path) as connection:
+            self.assertEqual(
+                connection.execute("SELECT COUNT(*) FROM learning_events").fetchone()[
+                    0
+                ],
+                0,
+            )
+        with self.assertRaises(LookupError):
+            self.service.get(attempt["id"])
+
+
+    def test_cancel_rejects_submitted_assignment_and_other_owner(self):
+        attempt = self.start()
+        self.submit(attempt["id"], LRU_01)
+        self.assertEqual(
+            self.client.delete(f"/api/learning/attempts/{attempt['id']}").status_code,
+            400,
+        )
+        draft = self.start()
+        with self.assertRaises(LookupError):
+            LearningStore(self.path, owner_id="other-user").cancel(draft["id"])
+        with sqlite3.connect(self.path) as connection:
+            state = self.service.store.get(draft["id"])
+            state["assignment_id"] = "class-task"
+            connection.execute(
+                "UPDATE attempts SET data=? WHERE id=?",
+                (json.dumps(state), draft["id"]),
+            )
+        self.assertEqual(
+            self.client.delete(f"/api/learning/attempts/{draft['id']}").status_code, 400
+        )
+        self.assertEqual(len(self.service.store.list_attempts()), 2)
+
+
     def test_lru_correction_retest_and_record_round_trip(self):
         attempt = self.start()
         self.assertIsNone(attempt["solution"])

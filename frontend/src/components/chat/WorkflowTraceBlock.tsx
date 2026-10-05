@@ -21,8 +21,6 @@ interface FlowNode {
   label: string;
   detail: string;
   stepIds: string[];
-  inferredFrom?: string[];
-  size?: "compact" | "normal" | "wide" | "mid" | "semi" | "long";
 }
 
 interface FlowEdge {
@@ -171,7 +169,7 @@ function FlowNodeButton({
   const duration = status === "skipped" ? null : resolveNodeDuration(node, stepMap);
   return (
     <button
-      className={`flow-node ${node.size || "normal"} ${status} ${isSelected ? "selected" : ""}`}
+      className={`flow-node ${status} ${isSelected ? "selected" : ""}`}
       type="button"
       onClick={onClick}
     >
@@ -381,11 +379,9 @@ function node(
   id: string,
   label: string,
   detail: string,
-  stepIds: string[],
-  inferredFrom: string[] = [],
-  size: FlowNode["size"] = "normal"
+  stepIds: string[]
 ): FlowNode {
-  return { id, label, detail, stepIds, inferredFrom, size };
+  return { id, label, detail, stepIds };
 }
 
 function edge(label?: string): FlowEdge {
@@ -482,10 +478,7 @@ function resolveNodeStatus(
   const directSteps = node.stepIds.map((stepId) => stepMap.get(stepId)).filter(Boolean) as AgentExecutionStep[];
   if (directSteps.length) return aggregateStatus(directSteps);
 
-  const inferredSteps = (node.inferredFrom || []).map((stepId) => stepMap.get(stepId)).filter(Boolean) as AgentExecutionStep[];
-  if (!inferredSteps.length) return "pending";
-  const inferred = aggregateStatus(inferredSteps);
-  return inferred === "error" ? "error" : inferred === "pending" ? "pending" : inferred;
+  return "pending";
 }
 
 function shouldSkipDeepSearchRetry(

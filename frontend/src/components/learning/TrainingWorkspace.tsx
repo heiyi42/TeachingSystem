@@ -107,6 +107,7 @@ function TrainingSession({
   const subject = useWorkbenchStore(state => state.preferredSubject);
   const setSubject = useWorkbenchStore(state => state.setPreferredSubject);
   const [chapter, setChapter] = useState("");
+  const [assistanceHidden, setAssistanceHidden] = useState(false);
   const [algorithm, setAlgorithm] = useState("全部");
   const [difficulty, setDifficulty] = useState("全部");
   useEffect(() => { setChapter(""); setAlgorithm("全部"); setDifficulty("全部"); }, [subject]);
@@ -283,7 +284,10 @@ function TrainingSession({
     try {
       await action();
       if (!demoId)
-        queryClient.invalidateQueries({ queryKey: ["learning-path", userId] });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["learning-path", userId] }),
+          queryClient.invalidateQueries({ queryKey: ["study-plan", userId] }),
+        ]);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -308,6 +312,22 @@ function TrainingSession({
       queryClient.invalidateQueries({
         queryKey: ["learning-progress", userId, demoId],
       });
+    });
+  }
+
+  function cancelRecord(id: string) {
+    run(async () => {
+      await flushDraft();
+      await enqueue(() => api.cancelLearning(id));
+      if (currentId.current === id) {
+        currentId.current = null;
+        pending.current = null;
+        setAttempt(null);
+        setRows([]);
+        localStorage.removeItem(ACTIVE_KEY);
+        localStorage.removeItem(DRAFT_KEY);
+      }
+      await progress.refetch();
     });
   }
 
@@ -465,19 +485,13 @@ function TrainingSession({
 
   return (
     <main className="training-surface">
-      <header className="training-header">
-        <h1>{section === "records" ? "学习记录" : "训练中心"}</h1>
-        {demoId && <span>演示数据 · 模拟作答</span>}
-        <button disabled={busy} onClick={() => switchMode(!demoId)}>
-          {demoId ? "退出演示" : "开始演示"}
-        </button>
-      </header>
       {demoId && (
         <div className="training-demo-controls">
           <p>
             演示记录单独保存。预设作答用于展示流程，记录中的“独立通过”为模拟结果。
           </p>
           <div>
+            <button disabled={busy} onClick={() => switchMode(false)}>退出演示</button>
             <button disabled={busy} onClick={() => switchMode(true)}>
               重新演示
             </button>
@@ -712,7 +726,7 @@ function TrainingSession({
             {exercises.data && (
               <div className="training-table-wrap">
                 {filtered.length > 0 && (
-                  <table className="training-table">
+                  <table className="training-table training-exercise-table">
                     <thead>
                       <tr>
                         <th>题目</th>
@@ -726,14 +740,6 @@ function TrainingSession({
                         <tr key={item.id}>
                           <td>
                             {item.title}
-                            {item.content_version && (
-                              <small>
-                                v{item.content_version} ·{" "}
-                                {item.publication_status === "published"
-                                  ? "已发布"
-                                  : "教师预览"}
-                              </small>
-                            )}
                           </td>
                           <td>{item.difficulty}</td>
                           <td>
@@ -822,12 +828,15 @@ function TrainingSession({
           </section>
         )}
         {view === "answer" && attempt && exercise && (
-          <div className="training-answer-layout">
+          <div className={`training-answer-layout${assistanceHidden ? " assistance-hidden" : ""}`}>
             <section className="training-answer">
+              <div className="training-answer-toolbar">
               <div className="training-breadcrumb">
                 {exercise.subject_name} / {exercise.chapter_title} /{" "}
                 {exercise.algorithm} · 版本 {attempt.content_version}
                 {attempt.parent_id ? " / 新题复测" : ""}
+              </div>
+              {assistanceHidden && <button type="button" className="training-link" aria-expanded={false} onClick={() => setAssistanceHidden(false)}>展开练习辅助</button>}
               </div>
               <div className="training-exercise-title">
                 <h2>{exercise.title}</h2>
@@ -1221,7 +1230,7 @@ function TrainingSession({
                   </div>
                 ) : (
                   <div className="training-table-wrap">
-                    <table className="training-table training-input-table">
+                    <table className="training-table training-input-table training-code-checkpoints">
                       <thead>
                         <tr>
                           <th>步骤</th>
@@ -1643,8 +1652,8 @@ function TrainingSession({
                 </div>
               )}
             </section>
-            <aside className="training-diagnosis">
-              <h2>练习辅助</h2>
+            <aside className="training-diagnosis" hidden={assistanceHidden}>
+              <div className="training-assistance-heading"><h2>练习辅助</h2><button type="button" className="training-link" aria-expanded={true} onClick={() => setAssistanceHidden(true)}>隐藏</button></div>
               <details className="training-support" key={`hint-${attempt.id}`}>
                 <summary>分步提示{attempt.hint ? " · 已获取" : ""}</summary>
                 <p className="training-muted">获取提示后通过将记为辅助完成。</p>
@@ -1995,15 +2004,26 @@ function TrainingSession({
                               </details>
                             </td>
                             <td>
-                              <button
-                                className="training-link"
-                                disabled={busy}
-                                onClick={() => openRecord(record.id)}
-                              >
-                                {record.status === "passed"
-                                  ? "查看作答"
-                                  : "继续作答"}
-                              </button>
+                              <div className="path-actions">
+                                <button
+                                  className="training-link"
+                                  disabled={busy}
+                                  onClick={() => openRecord(record.id)}
+                                >
+                                  {record.status === "passed"
+                                    ? "查看作答"
+                                    : "继续作答"}
+                                </button>
+                                {record.status === "in_progress" && record.submission_count === 0 && !record.assignment && (
+                                  <button
+                                    className="training-link"
+                                    disabled={busy}
+                                    onClick={() => cancelRecord(record.id)}
+                                  >
+                                    取消作答
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         ))}

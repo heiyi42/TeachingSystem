@@ -9,6 +9,15 @@ from webapp_core.chat import auto_runtime as auto
 from webapp_core import config as cfg
 
 
+CHAT_ANSWER_PRESENTATION = (
+    "回答呈现风格：像自然的聊天讲解，先直接回答，再按需要解释、举例或提醒。"
+    "段落简短连贯，重点适量加粗；复杂内容用小标题、列表或比较表，简单问题不硬拆成多节。"
+    "代码放在注明语言的代码块中，公式与普通文字保持易读，不堆重复总结。"
+    "可以自然使用1至3个emoji，例如在关键提示或示例旁使用💡、📌；短回答最多1个，"
+    "不要每条列表、每个标题都加emoji，不放入代码、公式或引用编号。"
+    "用户明确要求正式文风、无emoji或特定格式时遵从用户。\n"
+)
+
 class ChatRoutingMixin:
     @classmethod
     def _subject_label(cls, subject_id: str) -> str:
@@ -167,7 +176,8 @@ class ChatRoutingMixin:
             "4) 不要复述用户原问题，不要把原问题当标题。\n"
             "5) 代码分析和解题辅导直接根据已提供内容展开；缺少关键代码、题干或参数时先询问，不要编造输入。\n"
             "6) 没有实际执行代码时，不得声称已编译、运行或通过测试；区分推断结果和实测结果。\n\n"
-            f"回答语言要求：{self._response_language_instruction(response_language)}\n\n"
+            + CHAT_ANSWER_PRESENTATION
+            + f"回答语言要求：{self._response_language_instruction(response_language)}\n\n"
             f"当前模式：{mode}\n"
             f"课程范围：{scope or '未指定'}（仅作为理解问题的上下文，不代表已查询课程资料）\n"
             f"用户问题：{user_question}\n"

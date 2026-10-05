@@ -17,6 +17,7 @@ export interface ChatMessage {
 }
 
 export interface ChatSession {
+  title_pending?: boolean;
   chat_id: string;
   title: string;
   mode: ModeId;

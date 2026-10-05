@@ -167,19 +167,6 @@ export function LearningPathWorkspace({
 
   return (
     <main className="training-surface">
-      <header className="training-header">
-        <h1>{section === "path" ? "课程进度" : "错题复习"}</h1>
-        <span>{course?.name || "选择课程"}</span>
-        <button
-          disabled={busy}
-          onClick={() => {
-            path.refetch();
-            if (section === "path") plan.refetch();
-          }}
-        >
-          刷新记录
-        </button>
-      </header>
       {section === "path" && (
         <nav className="training-tabs" aria-label="课程进度视图">
           {([["chapters", "章节路径"], ["plan", "学习计划"], ["evidence", "学习证据"]] as const).map(([id, label]) => (
@@ -203,12 +190,23 @@ export function LearningPathWorkspace({
               </button>
             </p>
           )}
-          <label className="student-course-picker">当前课程
-            <select value={subject} disabled={busy} onChange={event => { setSubject(event.target.value as LearningSubject); setChapterId(""); setMaterial(null); }}>
-              {path.data?.courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </label>
-          {section === "path" && <details className="student-progress-note"><summary>如何理解阅读与训练进度</summary><p className="training-muted">{path.data?.notice}</p></details>}
+          <div className="learning-course-toolbar">
+            <label className="student-course-picker">当前课程
+              <select value={subject} disabled={busy} onChange={event => { setSubject(event.target.value as LearningSubject); setChapterId(""); setMaterial(null); }}>
+                {path.data?.courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            <button
+              disabled={busy}
+              onClick={() => {
+                path.refetch();
+                if (section === "path") plan.refetch();
+              }}
+            >
+              刷新记录
+            </button>
+          </div>
+          {section === "path" && pathView !== "plan" && <details className="student-progress-note"><summary>如何理解阅读与训练进度</summary><p className="training-muted">{path.data?.notice}</p></details>}
           {section === "path" && course && (
             <>
               <section
@@ -226,7 +224,10 @@ export function LearningPathWorkspace({
                 )}
                 {plan.data && (
                   <>
-                    <p className="training-muted">{plan.data.notice}</p>
+                    <details className="study-plan-explanation">
+                      <summary>计划依据与更新方式</summary>
+                      <p className="training-muted">{plan.data.notice}</p>
+                    </details>
                     <div className="study-plan-settings">
                       <label>
                         目标章节
@@ -275,7 +276,7 @@ export function LearningPathWorkspace({
                           : "保存学习目标"}
                       </button>
                     </div>
-                    <div>
+                    <div className="study-plan-generation">
                       {(studyMinutes !== plan.data.profile.minutes ||
                         targetChapter !== plan.data.profile.chapter_id) && (
                         <p>请先保存目标和时间，再生成 AI 计划。</p>
@@ -301,19 +302,12 @@ export function LearningPathWorkspace({
                             : "让 AI 分析并安排"}
                       </button>
                       {workflow.running && <p>AI 计划正在生成，刷新或离开后仍可返回查看。</p>}
-                      {workflow.run?.error && <p>{workflow.run.error}</p>}
-                      {workflow.error && <p>{workflow.error}</p>}
+                      {(workflow.error || (workflow.run?.error && !(plan.data.ai_stale && workflow.run.error === "学习记录或目标已变化，请重新生成。"))) && <p role="alert">{workflow.error || workflow.run?.error}</p>}
                       {workflow.run?.can_resume && <button className="ghost-action" disabled={busy || workflow.running}
                         onClick={() => run(async () => {
                           try { await api.generateStudyPlan(subject, workflow.run!.id); }
                           finally { await workflow.refresh(); }
                         })}>继续上次计划</button>}
-                      {plan.data.ai_stale && (
-                        <p>
-                          学习记录或目标已变化，原 AI
-                          计划已失效。当前显示基础安排，可重新生成。
-                        </p>
-                      )}
                       {plan.data.ai_plan ? (
                         <>
                           <p className="training-muted">
@@ -328,8 +322,9 @@ export function LearningPathWorkspace({
                         </>
                       ) : (
                         <p className="training-muted">
-                          当前为基础安排。AI
-                          会结合答题证据分析薄弱点，并从可用任务中选择学习安排。
+                          {plan.data.ai_stale
+                            ? "学习记录或目标已更新，当前显示基础安排。可重新生成 AI 计划。"
+                            : "当前为基础安排，可让 AI 根据作答记录分析薄弱点并安排学习任务。"}
                         </p>
                       )}
                     </div>
@@ -345,18 +340,21 @@ export function LearningPathWorkspace({
                         部分知识点涉及尚未公布的测验，待公布后再纳入诊断和计划。
                       </p>
                     )}
-                    <ul>
+                    <ul className="study-diagnostic-list">
                       {plan.data.diagnostics.map((d) => (
                         <li key={d.point_id}>
-                          <strong>{d.title}</strong> ·{" "}
-                          {d.completed ? d.status : "等待作答"}
-                          <p>{d.basis}</p>
-                          <details>
-                            <summary>诊断覆盖的目标</summary>
-                            {d.objectives.map((o) => (
-                              <p key={o}>{o}</p>
-                            ))}
-                          </details>
+                          <div>
+                            <strong>{d.title}</strong> ·{" "}
+                            {d.completed ? d.status : "等待作答"}
+                            <p>{d.basis}</p>
+                            <details>
+                              <summary>诊断覆盖的目标</summary>
+                              {d.objectives.map((o) => (
+                                <p key={o}>{o}</p>
+                              ))}
+                            </details>
+                          </div>
+                          <div className="path-actions">
                           {!d.completed && (
                             <button
                               className="ghost-action"
@@ -376,9 +374,14 @@ export function LearningPathWorkspace({
                               {d.attempt_id ? "继续诊断" : "开始诊断"}
                             </button>
                           )}
+                          <button className="training-link" disabled={busy} onClick={() => run(async () => { await api.skipStudyPoint(subject, d.point_id, true); })}>跳过此项</button>
+                          </div>
                         </li>
                       ))}
                     </ul>
+                    {!!plan.data.skipped_points?.length && <details className="study-plan-explanation"><summary>已跳过 · {plan.data.skipped_points.length} 项</summary>
+                      <ul>{plan.data.skipped_points.map(point => <li key={point.id}>{point.title} <button className="training-link" disabled={busy} onClick={() => run(async () => { await api.skipStudyPoint(subject, point.id, false); })}>恢复</button></li>)}</ul>
+                    </details>}
                     <h3>
                       本次学习安排 · 预计 {plan.data.estimated_minutes} 分钟
                     </h3>
@@ -393,7 +396,7 @@ export function LearningPathWorkspace({
                         当前没有可执行的推荐任务。可查看课程目标、资料和已有训练记录。
                       </p>
                     )}
-                    <ol>
+                    <ol className="study-task-list">
                       {plan.data.tasks.map((t) => (
                         <li key={t.token}>
                           <strong>
@@ -406,8 +409,9 @@ export function LearningPathWorkspace({
                             disabled={busy || !!explaining}
                             onClick={() => followAction(t)}
                           >
-                            执行此项
+                              执行此项
                           </button>
+                          <button className="training-link" disabled={busy} onClick={() => run(async () => { await api.skipStudyPoint(subject, t.point_id, true); })}>跳过此项</button>
                           {t.evidence_ids.length > 0 && (
                             <button
                               className="training-link"

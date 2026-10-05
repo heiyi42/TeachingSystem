@@ -45,6 +45,11 @@ def school_blueprint(school: SchoolStore, learning: LearningService):
         teacher()
         return jsonify(LessonPlanService(tasks(), learning).generate(class_id, payload()))
 
+    @blueprint.post("/school/classes/<class_id>/lesson-plans/generations/<generation_id>/cancel")
+    def lesson_plan_cancel(class_id, generation_id):
+        teacher()
+        return jsonify(LessonPlanService(tasks(), learning).cancel_generation(class_id, generation_id))
+
     @blueprint.post("/school/classes/<class_id>/lesson-plans")
     def lesson_plan_save(class_id):
         teacher()
@@ -209,7 +214,8 @@ def school_blueprint(school: SchoolStore, learning: LearningService):
     def login():
         data = payload()
         user, token = school.login(
-            data.get("username"), data.get("password"), request.remote_addr
+            data.get("username"), data.get("password"), request.remote_addr,
+            selected_role=data.get("selected_role"),
         )
         return logged_in(user, token)
 

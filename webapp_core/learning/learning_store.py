@@ -47,6 +47,9 @@ class LearningStore:
             "CREATE TABLE IF NOT EXISTS lesson_plans (id TEXT PRIMARY KEY, class_id TEXT NOT NULL, data TEXT NOT NULL)"
         )
         connection.execute(
+            "CREATE TABLE IF NOT EXISTS lesson_generations (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, class_id TEXT NOT NULL, status TEXT NOT NULL)"
+        )
+        connection.execute(
             "CREATE TABLE IF NOT EXISTS task_submissions (task_id TEXT NOT NULL, user_id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(task_id,user_id))"
         )
         connection.execute(
@@ -68,6 +71,7 @@ class LearningStore:
             "CREATE TABLE IF NOT EXISTS ai_study_plans (owner_id TEXT NOT NULL, subject_id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(owner_id,subject_id))"
         )
         from webapp_core.assistant.assistant_store import schema
+
         schema(connection)
         connection.commit()
         return connection
@@ -248,6 +252,30 @@ class LearningStore:
             raise LookupError("练习不存在")
         return state
 
+    def cancel(self, attempt_id: str) -> None:
+        with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT data FROM attempts WHERE id=?", (attempt_id,)
+            ).fetchone()
+            state = json.loads(row[0]) if row else None
+            if (
+                state is None
+                or not self._owned(state)
+                or (
+                    self.owner_id is not None and state.get("owner_id") != self.owner_id
+                )
+            ):
+                raise LookupError("练习不存在")
+            if state.get("assignment_id"):
+                raise ValueError("班级任务的作答不能取消")
+            if state["status"] != "in_progress" or state.get("submissions"):
+                raise ValueError("只能取消尚未提交的作答")
+            connection.execute(
+                "DELETE FROM learning_events WHERE attempt_id=?", (attempt_id,)
+            )
+            connection.execute("DELETE FROM attempts WHERE id=?", (attempt_id,))
+
     def create(
         self,
         factory: Callable[[list[dict[str, Any]]], dict[str, Any]],
@@ -350,15 +378,33 @@ class LearningStore:
                 (json.dumps(state, ensure_ascii=False), attempt_id),
             )
             self._event(connection, attempt_id, kind, event)
-            if kind == "submitted" and state.get("owner_id") and not state.get("assignment_id"):
+            if (
+                kind == "submitted"
+                and state.get("owner_id")
+                and not state.get("assignment_id")
+            ):
                 from webapp_core.assistant.assistant_store import enqueue
+
                 last = state["submissions"][-1]
                 first = state["submissions"][0]
-                enqueue(connection, state["owner_id"], f"practice:{attempt_id}:{len(state['submissions'])}",
-                        json.dumps({"来源": "系统核验的课外练习", "题目": state["exercise_id"],
-                            "结果": state["status"], "首错": state.get("first_error"),
-                            "首次独立通过": bool(first["evaluation"]["passed"] and first["unassisted"]),
-                            "本次提交通过": bool(last["evaluation"]["passed"])}, ensure_ascii=False))
+                enqueue(
+                    connection,
+                    state["owner_id"],
+                    f"practice:{attempt_id}:{len(state['submissions'])}",
+                    json.dumps(
+                        {
+                            "来源": "系统核验的课外练习",
+                            "题目": state["exercise_id"],
+                            "结果": state["status"],
+                            "首错": state.get("first_error"),
+                            "首次独立通过": bool(
+                                first["evaluation"]["passed"] and first["unassisted"]
+                            ),
+                            "本次提交通过": bool(last["evaluation"]["passed"]),
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
             return state
 
     def freeze_legacy(self, exercises):

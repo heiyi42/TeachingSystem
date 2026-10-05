@@ -133,7 +133,25 @@ class ChatRetrievalSupportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(emitted, ["规则求解已完成。"])
         self.assertEqual(captured["prompt"], "请按模板解答这道题。")
 
-    async def test_stream_llm_text_flushes_accumulated_chunks(self) -> None:
+    async def test_stream_llm_text_does_not_hold_short_chunks(self) -> None:
+        service = self._build_service()
+        emitted = []
+
+        async def chunks(_):
+            for text in ("首", "字", "接", "着", "输出"):
+                before = len(emitted)
+                yield SimpleNamespace(content=text)
+                self.assertEqual(emitted[before:], [text])
+
+        answer = await service._stream_llm_text(
+            llm_client=SimpleNamespace(astream=chunks),
+            prompt="Q",
+            timeout_s=3,
+            emit_text=emitted.append,
+        )
+        self.assertEqual(answer, "首字接着输出")
+
+    async def test_stream_llm_text_emits_chunks_in_order(self) -> None:
         service = self._build_service()
         emitted: list[str] = []
         before_first_emit_counts: list[int] = []
@@ -146,7 +164,6 @@ class ChatRetrievalSupportTests(unittest.IsolatedAsyncioTestCase):
             prompt="irrelevant",
             timeout_s=3,
             emit_text=emitted.append,
-            flush_chars=6,
             before_first_emit=before_first_emit,
         )
 

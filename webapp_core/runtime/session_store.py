@@ -36,6 +36,8 @@ class ChatSession:
     title: str
     mode: str = "instant"
     pinned: bool = False
+    title_generation_started: bool = False
+    title_pending: bool = False
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     memory: Any = None
@@ -47,6 +49,11 @@ class ChatSession:
         data: dict[str, Any] = {
             "chat_id": self.chat_id,
             "title": self.title,
+            "title_pending": self.title_pending
+            or (
+                not self.turns
+                and re.fullmatch(r"新聊天(?:\s+\d+)?", self.title) is not None
+            ),
             "mode": self.mode,
             "pinned": self.pinned,
             "created_at": self.created_at,
@@ -214,6 +221,7 @@ class SessionStore:
                 "title": session.title,
                 "mode": session.mode,
                 "pinned": bool(session.pinned),
+                "title_generation_started": session.title_generation_started,
                 "created_at": session.created_at,
                 "updated_at": session.updated_at,
                 "turns": [[q, a] for q, a in session.turns],
@@ -330,6 +338,9 @@ class SessionStore:
                 title=title,
                 mode=mode,
                 pinned=pinned,
+                title_generation_started=bool(
+                    row.get("title_generation_started", False)
+                ),
                 created_at=created_at,
                 updated_at=updated_at,
                 memory=self.memory_for_thread(chat_id),

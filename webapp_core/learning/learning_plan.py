@@ -43,7 +43,7 @@ class LearningPlanService:
         }
 
     def configure(self, subject, data):
-        self.profile(subject)
+        profile = self.profile(subject)
         minutes = data.get("minutes")
         chapter_id = data.get("chapter_id", "")
         if type(minutes) is not int or not 15 <= minutes <= 120:
@@ -56,11 +56,28 @@ class LearningPlanService:
         self.learning.store.save_study_profile(
             subject,
             {
+                **profile,
                 "minutes": minutes,
                 "chapter_id": chapter_id,
                 "configured": True,
             },
         )
+        return self.view(subject)
+
+    def skip_point(self, subject, data):
+        profile = self.profile(subject)
+        point_id, skipped = data.get("point_id"), data.get("skipped")
+        if type(skipped) is not bool or not isinstance(point_id, str):
+            raise ValueError("请指定学习目标和是否跳过")
+        points = self.path.dashboard()["points"]
+        if not any(p["id"] == point_id and p["subject_id"] == subject for p in points):
+            raise ValueError("学习目标不属于当前课程")
+        excluded = set(profile.get("skipped_points", []))
+        if skipped:
+            excluded.add(point_id)
+        else:
+            excluded.discard(point_id)
+        self.learning.store.save_study_profile(subject, {**profile, "skipped_points": sorted(excluded)})
         return self.view(subject)
 
     def view(self, subject, *, include_ai=True):
@@ -80,6 +97,8 @@ class LearningPlanService:
             for p in dashboard["points"]
             if p["subject_id"] == subject and (not scope or p["chapter_id"] in scope)
         ]
+        skipped_points = [{"id": p["id"], "title": p["title"]} for p in dashboard["points"] if p["subject_id"] == subject and p["id"] in profile.get("skipped_points", [])]
+        points = [p for p in points if p["id"] not in profile.get("skipped_points", [])]
         available = [
             p for p in points if p["available_count"] and not p["guidance_blocked"]
         ]
@@ -256,6 +275,7 @@ class LearningPlanService:
             "subject_id": subject,
             "profile": profile,
             "diagnostics": diagnostics,
+            "skipped_points": skipped_points,
             "diagnostic_completed": sum(d["completed"] for d in diagnostics),
             "blocked_points": sum(p["guidance_blocked"] for p in points),
             "tasks": tasks,

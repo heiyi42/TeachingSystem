@@ -92,6 +92,23 @@ class SchoolPermissionsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201, response.json)
         return response.json
 
+    def test_login_checks_selected_identity_before_creating_session(self):
+        for username, role in (("teacher", "teacher"), ("student", "student"), ("admin", "admin")):
+            with self.subTest(role=role):
+                client = self.app.test_client()
+                wrong = "admin" if role != "admin" else "student"
+                response = client.post("/api/identity/login", json={**self.credentials(username), "selected_role": wrong})
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("身份不一致", response.json["error"])
+                self.assertIsNone(client.get("/api/identity/session").json["user"])
+                response = client.post("/api/identity/login", json={**self.credentials(username), "selected_role": role})
+                self.assertEqual(response.status_code, 200, response.json)
+                self.assertEqual(response.json["user"]["role"], role)
+        client = self.app.test_client()
+        response = client.post("/api/identity/login", json={**self.credentials("student"), "selected_role": "owner"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIsNone(client.get("/api/identity/session").json["user"])
+
     def test_automated_review_has_explicit_audit_identity_without_login_user(self):
         self.school.transition("training:dh_01", 1, {"id": "system:codex"}, "approve", "用户授权的 Codex 自动化审核")
         entry = self.school.audit_log("training:dh_01")[-1]

@@ -203,6 +203,8 @@ class TaskService:
                 plan = json.loads(row[0])
                 if plan["class_id"] != class_id:
                     raise PermissionError("备课安排不属于本班")
+                if plan.get("status", "confirmed") != "confirmed":
+                    raise ValueError("请先确认保存备课草案，再关联补练任务")
                 if not old and data.get("lesson_plan_revision") != plan["revision"]:
                     raise LearningConflict("备课安排已更新，请重新打开后布置补练")
                 if any(catalog[i]["chapter_id"] != plan["chapter_id"] for i in ids):

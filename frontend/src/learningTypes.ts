@@ -577,6 +577,7 @@ export interface StudyPlan {
   ai_stale: boolean;
   subject_id: LearningSubject;
   profile: { minutes: number; chapter_id: string; configured: boolean };
+  skipped_points?: Array<{ id: string; title: string }>;
   diagnostics: Array<{
     point_id: string;
     title: string;

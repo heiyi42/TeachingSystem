@@ -29,6 +29,8 @@ def schema(db):
     db.execute(
         "CREATE TABLE IF NOT EXISTS assistant_profiles (owner TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1, epoch INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 0, snapshot TEXT NOT NULL DEFAULT '{}')"
     )
+    if "name" not in {row[1] for row in db.execute("PRAGMA table_info(assistant_profiles)")}:
+        db.execute("ALTER TABLE assistant_profiles ADD COLUMN name TEXT NOT NULL DEFAULT '个人助理'")
     db.execute(
         "CREATE TABLE IF NOT EXISTS assistant_messages (id TEXT PRIMARY KEY, owner TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created REAL NOT NULL, status TEXT NOT NULL, reply_to TEXT)"
     )
@@ -257,6 +259,13 @@ class AssistantStore:
             "memory_error": job["error"] if job else None,
         }
 
+    def rename(self, owner, name):
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 24 or not name.strip().isprintable():
+            raise ValueError("助理名字须为1至24个字符，不能包含换行或控制字符")
+        with closing(self.connect()) as db, db:
+            db.execute("INSERT OR IGNORE INTO assistant_profiles(owner) VALUES (?)", (owner,))
+            db.execute("UPDATE assistant_profiles SET name=? WHERE owner=?", (name.strip(), owner))
+
     def begin_message(self, owner, request_id, content):
         with closing(self.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
@@ -268,7 +277,7 @@ class AssistantStore:
                     raise ValueError("请求编号冲突")
                 if old["status"] == "complete":
                     return False
-                if old["status"] == "pending" and time.time() - old["created"] < 120:
+                if old["status"] == "pending" and time.time() - old["created"] < 180:
                     raise ValueError("这条消息正在处理，请稍后刷新")
                 db.execute(
                     "UPDATE assistant_messages SET status='pending',created=? WHERE id=?",
@@ -277,7 +286,7 @@ class AssistantStore:
                 return True
             pending = db.execute(
                 "SELECT 1 FROM assistant_messages WHERE owner=? AND status='pending' AND created>?",
-                (owner, time.time() - 120),
+                (owner, time.time() - 180),
             ).fetchone()
             if pending:
                 raise ValueError("请等待上一条消息完成")
@@ -290,9 +299,26 @@ class AssistantStore:
 
     def teacher_results(self, owner):
         with closing(self.connect()) as db:
-            return [dict(request_id=row[0], **json.loads(row[1])) for row in db.execute(
-                "SELECT request_id,data FROM assistant_teacher_results WHERE owner=? ORDER BY rowid", (owner,)
-            )]
+            return [
+                dict(request_id=row[0], **json.loads(row[1]))
+                for row in db.execute(
+                    "SELECT request_id,data FROM assistant_teacher_results WHERE owner=? ORDER BY rowid",
+                    (owner,),
+                )
+            ]
+
+    def start_teacher_task(self, owner, request_id, task):
+        with closing(self.connect()) as db, db:
+            row = db.execute(
+                "SELECT 1 FROM assistant_messages WHERE owner=? AND id=? AND status='pending'",
+                (owner, request_id),
+            ).fetchone()
+            if row:
+                db.execute(
+                    "INSERT INTO assistant_teacher_results VALUES (?,?,?) "
+                    "ON CONFLICT(request_id) DO UPDATE SET data=excluded.data",
+                    (request_id, owner, encode(task)),
+                )
 
     def finish_message(self, owner, request_id, reply=None, teacher_result=None):
         with closing(self.connect()) as db, db:
@@ -307,10 +333,26 @@ class AssistantStore:
                 "UPDATE assistant_messages SET status=? WHERE owner=? AND id=?",
                 ("complete" if reply else "failed", owner, request_id),
             )
+            if not teacher_result:
+                task = db.execute(
+                    "SELECT data FROM assistant_teacher_results WHERE owner=? AND request_id=?",
+                    (owner, request_id),
+                ).fetchone()
+                if task:
+                    failed = json.loads(task[0])
+                    failed.update(
+                        status="failed", error=reply or "生成未完成，请重试。"
+                    )
+                    db.execute(
+                        "UPDATE assistant_teacher_results SET data=? WHERE owner=? AND request_id=?",
+                        (encode(failed), owner, request_id),
+                    )
             if reply:
                 if teacher_result:
-                    db.execute("INSERT INTO assistant_teacher_results VALUES (?,?,?)",
-                               (request_id, owner, encode(teacher_result)))
+                    db.execute(
+                        "INSERT INTO assistant_teacher_results VALUES (?,?,?) ON CONFLICT(request_id) DO UPDATE SET data=excluded.data",
+                        (request_id, owner, encode(teacher_result)),
+                    )
                 db.execute(
                     "INSERT INTO assistant_messages VALUES (?,?,?,?,?,?,?)",
                     (
@@ -358,7 +400,9 @@ class AssistantStore:
                             (owner, event_id),
                         )
                 db.execute("DELETE FROM assistant_messages WHERE owner=?", (owner,))
-                db.execute("DELETE FROM assistant_teacher_results WHERE owner=?", (owner,))
+                db.execute(
+                    "DELETE FROM assistant_teacher_results WHERE owner=?", (owner,)
+                )
                 db.execute(
                     "UPDATE assistant_profiles SET snapshot='{}' WHERE owner=?",
                     (owner,),

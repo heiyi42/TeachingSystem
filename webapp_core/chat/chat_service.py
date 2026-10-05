@@ -804,30 +804,3 @@ class ChatService(
             "只保留必要的条件、依据和不确定性说明，不套用固定章节，不追加练习、扩展或非必要示例。"
             "若要求引用，保留真实检索出处；证据不足就说明，不编造来源。"
         )
-
-    def _apply_answer_style_to_question(
-        self,
-        question: str,
-        *,
-        user_question: str,
-        subject_id: str,
-        mode: str,
-        response_language: str,
-    ) -> str:
-        language_instruction = self._response_language_instruction(response_language)
-        task_type = self._detect_subject_task_type(subject_id, user_question)
-        style_instruction = self._requested_brief_style(user_question) or self._subject_answer_style_instruction(
-            subject_id,
-            task_type,
-            mode,
-            response_language,
-        )
-        text = str(question or "").rstrip()
-        instructions = (
-            f"[Answer language requirement]\n{language_instruction}\n\n"
-            f"[Detected task type]\n{task_type}\n\n"
-            f"[Answer format requirement]\n{style_instruction}"
-        )
-        if not text:
-            return instructions
-        return f"{text}\n\n{instructions}"

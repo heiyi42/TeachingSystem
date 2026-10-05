@@ -90,6 +90,8 @@ export function createLearningApi(demoId = "", classId = "") {
         method: "PUT",
         body: JSON.stringify({ minutes, chapter_id }),
       }),
+    skipStudyPoint: (subject: string, point_id: string, skipped: boolean) =>
+      apiJson<StudyPlan>(`${prefix}/plan/${subject}/skipped-point`, { method: "PUT", body: JSON.stringify({ point_id, skipped }) }),
     beginDiagnostic: (subject: string, point_id: string) =>
       apiJson<{ attempt_id: string }>(`${prefix}/plan/${subject}/diagnostic`, {
         method: "POST",
@@ -157,6 +159,8 @@ export function createLearningApi(demoId = "", classId = "") {
       }),
     getLearning: (id: string) =>
       apiJson<LearningAttempt>(`${prefix}/attempts/${id}`),
+    cancelLearning: (id: string) =>
+      apiJson<{ deleted: boolean }>(`${prefix}/attempts/${id}`, { method: "DELETE" }),
     saveLearningDraft: (id: string, rows: LearningRow[]) =>
       apiJson<LearningAttempt>(`${prefix}/attempts/${id}/draft`, {
         method: "PUT",
@@ -187,6 +191,7 @@ export const api = {
   examToday: (id: string, revision: number, minutes: number) => apiJson<ExamPlan>(`/api/assistant/exam-plans/${id}/today`, { method: "PUT", body: JSON.stringify({revision, minutes}) }),
   examStartTask: (id: string, task: string) => apiJson<LearningAttempt>(`/api/assistant/exam-plans/${id}/tasks/${task}/start`, { method: "POST", body: "{}" }),
   assistant: () => apiJson<AssistantView>("/api/assistant"),
+  renameAssistant: (name: string) => apiJson<AssistantView>("/api/assistant/name", { method: "PUT", body: JSON.stringify({ name }) }),
   assistantMessage: (content: string, request_id: string) => apiJson<AssistantView>("/api/assistant/messages", { method: "POST", body: JSON.stringify({content, request_id}) }),
   assistantMemory: (enabled: boolean) => apiJson<AssistantView>("/api/assistant/memory", { method: "PUT", body: JSON.stringify({enabled}) }),
   assistantForget: (id?: string) => apiJson<AssistantView>(`/api/assistant/memory${id ? `/${encodeURIComponent(id)}` : ""}`, { method: "DELETE", body: "{}" }),
@@ -201,7 +206,7 @@ export const api = {
     ),
   signIn: (
     action: "setup" | "login" | "register",
-    data: { username: string; password: string; name: string },
+    data: { username: string; password: string; name: string; selected_role?: SchoolUser["role"] },
   ) =>
     apiJson<{ user: SchoolUser }>(`/api/identity/${action}`, {
       method: "POST",
@@ -334,10 +339,12 @@ export const api = {
     ),
   lessonPlans: (classId: string) =>
     apiJson<{ chapters: Array<{ id: string; title: string }>; plans: LessonPlan[] }>(`/api/school/classes/${classId}/lesson-plans`),
-  generateLessonPlan: (classId: string, chapter_id: string, minutes: number) =>
+  generateLessonPlan: (classId: string, chapter_id: string, minutes: number, requirements = "", generation_id?: string, signal?: AbortSignal) =>
     apiJson<LessonPlan>(`/api/school/classes/${classId}/lesson-plans/generate`, {
-      method: "POST", body: JSON.stringify({ chapter_id, minutes }),
+      method: "POST", body: JSON.stringify({ chapter_id, minutes, requirements, generation_id }), signal,
     }),
+  cancelLessonGeneration: (classId: string, generationId: string) =>
+    apiJson<{ cancelled: boolean }>(`/api/school/classes/${classId}/lesson-plans/generations/${generationId}/cancel`, { method: "POST", body: "{}" }),
   saveLessonPlan: (plan: LessonPlan) =>
     apiJson<LessonPlan>(`/api/school/classes/${plan.class_id}/lesson-plans${plan.id ? `/${plan.id}` : ""}`, {
       method: plan.id ? "PUT" : "POST", body: JSON.stringify({ ...plan, confirmed: true }),

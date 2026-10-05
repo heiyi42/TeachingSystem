@@ -99,7 +99,9 @@ class SchoolStore:
             )
         return user
 
-    def login(self, username, password, address):
+    def login(self, username, password, address, *, selected_role=None):
+        if selected_role is not None and selected_role not in ("teacher", "student", "admin"):
+            raise ValueError("请选择有效的登录身份")
         if (
             not isinstance(username, str)
             or not isinstance(password, str)
@@ -135,6 +137,8 @@ class SchoolStore:
                     (key, count, until),
                 )
             else:
+                if selected_role is not None and row["role"] != selected_role:
+                    raise ValueError("所选身份与账号身份不一致，请重新选择")
                 connection.execute("DELETE FROM login_limits WHERE key=?", (key,))
                 token = secrets.token_urlsafe(32)
                 connection.execute(

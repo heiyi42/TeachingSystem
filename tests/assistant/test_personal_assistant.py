@@ -21,6 +21,16 @@ class AssistantStoreTests(unittest.TestCase):
         with closing(self.store.connect()) as db, db:
             enqueue(db, owner, key, content)
 
+    def test_assistant_name_persisted_and_account_scoped(self):
+        self.assertEqual(self.store.view("alice")["name"], "个人助理")
+        self.store.rename("alice", " 小蓝 ")
+        self.assertEqual(AssistantStore(self.store.path).view("alice")["name"], "小蓝")
+        self.assertEqual(self.store.view("bob")["name"], "个人助理")
+        for name in [None, "", "   ", "x" * 25, "小\n蓝"]:
+            with self.assertRaises(ValueError):
+                self.store.rename("alice", name)
+        self.assertEqual(self.store.view("alice")["name"], "小蓝")
+
     def test_message_and_event_idempotency_and_owner_isolation(self):
         self.assertTrue(self.store.begin_message("alice", "a" * 32, "今天半小时"))
         self.store.finish_message("alice", "a" * 32, "先做一道练习")

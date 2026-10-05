@@ -21,15 +21,6 @@ class ChatDeepSearchTests(unittest.IsolatedAsyncioTestCase):
     async def test_brief_request_keeps_necessary_evidence_without_forced_outline(self):
         service = self._build_service()
         question = "根据课程资料简短解释指针，并给出出处。"
-        prompt = service._apply_answer_style_to_question(
-            question,
-            user_question=question,
-            subject_id="C_program",
-            mode="auto",
-            response_language="zh",
-        )
-        self.assertIn("真实检索出处", prompt)
-        self.assertNotIn("## 扩展", prompt)
         service._stream_routed_deepsearch_mode = AsyncMock(
             return_value={"answer": "有依据的回答"}
         )

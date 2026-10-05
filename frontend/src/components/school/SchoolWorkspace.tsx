@@ -9,13 +9,9 @@ import type {
   ContentVersion,
   SchoolAttempt,
 } from "../../schoolTypes";
+import { COURSE_NAMES } from "../../schoolTypes";
 import type { LearningProgress } from "../../learningTypes";
 
-const COURSE_NAMES: Record<string, string> = {
-  C_program: "C 语言",
-  operating_systems: "操作系统",
-  cybersec_lab: "网络安全实验",
-};
 const ACTION_NAMES: Record<string, string> = {
   content_drafted: "建立草稿",
   content_edited: "编辑草稿",
@@ -182,9 +178,6 @@ export function SchoolWorkspace({
 
   return (
     <main className="training-surface school-workspace">
-      <header className="training-header">
-        <h1>{{ classes: "班级管理", tasks: teacher ? "作业与测验" : "我的作业", reports: "班级学情", preparation: "备课安排", content: "题库审核", grading: "评测复核", account: "账号设置" }[tab]}</h1>
-      </header>
       <div className="training-content school-content">
         {error && <p role="alert">{error}</p>}
         {message && <p role="status">{message}</p>}

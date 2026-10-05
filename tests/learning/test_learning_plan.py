@@ -41,6 +41,34 @@ class StudyPlanTests(unittest.TestCase):
         with self.assertRaises(LearningConflict):
             plan.begin_diagnostic("C_program", point)
 
+    def test_cancelled_diagnostic_is_not_referenced_by_plan(self):
+        plan = LearningPlanService(self.service)
+        before = plan.view("C_program")
+        point = before["diagnostics"][0]["point_id"]
+        attempt_id = plan.begin_diagnostic("C_program", point)["attempt_id"]
+        active = plan.view("C_program")
+        self.assertEqual(next(d for d in active["diagnostics"] if d["point_id"] == point)["attempt_id"], attempt_id)
+        self.service.store.cancel(attempt_id)
+        updated = plan.view("C_program")
+        self.assertIsNone(next(d for d in updated["diagnostics"] if d["point_id"] == point)["attempt_id"])
+        self.assertTrue(all(t.get("attempt_id") != attempt_id for t in updated["tasks"]))
+        self.assertNotEqual(plan.begin_diagnostic("C_program", point)["attempt_id"], attempt_id)
+
+    def test_skipped_point_excluded_persisted_and_restorable(self):
+        plan = LearningPlanService(self.service)
+        point = plan.view("C_program")["diagnostics"][0]["point_id"]
+        skipped = plan.skip_point("C_program", {"point_id": point, "skipped": True})
+        self.assertFalse(any(d["point_id"] == point for d in skipped["diagnostics"]))
+        self.assertFalse(any(t["point_id"] == point for t in skipped["tasks"]))
+        self.assertEqual(skipped["skipped_points"][0]["id"], point)
+        plan.configure("C_program", {"minutes": 45})
+        self.assertIn(point, plan.profile("C_program")["skipped_points"])
+        restored = plan.skip_point("C_program", {"point_id": point, "skipped": False})
+        self.assertTrue(any(d["point_id"] == point for d in restored["diagnostics"]))
+        self.assertEqual(restored["skipped_points"], [])
+        with self.assertRaises(ValueError):
+            plan.skip_point("operating_systems", {"point_id": point, "skipped": True})
+
     def test_profiles_isolated_scoped_and_budgeted(self):
         plan = LearningPlanService(self.service)
         saved = plan.configure(

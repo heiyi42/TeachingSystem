@@ -108,6 +108,36 @@ class ChatStreamingTests(unittest.TestCase):
 
         self.assertEqual(chunks, ["abcd", "efgh", "ij"])
 
+    def test_instant_has_no_default_deadline_and_respects_explicit_timeout(self):
+        from unittest.mock import patch
+        from webapp_core import config as cfg
+
+        for requested in (None, 25, 5):
+            with self.subTest(timeout=requested):
+                service = self._build_service()
+                budgets = []
+
+                async def stream(**kwargs):
+                    budgets.append(kwargs["timeout_s"])
+                    kwargs["emit_text"]("完整回答")
+                    return "完整回答"
+
+                service._stream_llm_text = stream
+                payload = {"message": "解释页面置换", "mode": "instant"}
+                if requested is not None:
+                    payload["timeout"] = requested
+                with patch.dict(cfg.DEFAULT_TIMEOUT_BY_MODE, {"instant": 60}):
+                    handler, error = service.build_chat_message_stream_handler("chat-1", payload)
+                    self.assertIsNone(error)
+                    list(handler())
+                self.assertEqual(len(budgets), 1)
+                if requested is None:
+                    self.assertIsNone(budgets[0])
+                else:
+                    self.assertGreaterEqual(budgets[0], requested - 2)
+                    self.assertLessEqual(budgets[0], requested)
+                self.assertEqual(service.store.saved_answers[-1]["answer"], "完整回答")
+
     def test_sse_encode_formats_event_payload(self) -> None:
         payload = ChatService.sse_encode("meta", {"ok": True})
 
@@ -214,7 +244,7 @@ class ChatStreamingTests(unittest.TestCase):
 
     def test_instant_streams_directly_even_with_explicit_subject(self) -> None:
         from unittest.mock import AsyncMock, Mock
-        for subjects in ([], ["C_program"]):
+        for subjects in ([], ["C_program"], ["operating_systems"], ["cybersec_lab"]):
             with self.subTest(subjects=subjects):
                 service = self._build_service()
                 service.graph_service = Mock(configured=True)

@@ -1,8 +1,10 @@
 import { useDiscardChanges } from "./components/shared/useDiscardChanges";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookOpen,
+  ChevronDown,
   Menu,
   X,
   MessageSquare,
@@ -24,7 +26,8 @@ import {
   MoreHorizontal,
   PencilLine,
   Pin,
-  Send,
+  ArrowUp,
+  Square,
   Trash2,
 } from "lucide-react";
 import { api, streamChatMessage } from "./api";
@@ -76,6 +79,7 @@ function Workbench({
 }) {
   const queryClient = useQueryClient();
   const mountedRef = useRef(true);
+  const initialChatSelected = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const executionRef = useRef<{ chatId: string; id: string; execution_id: string } | null>(null);
   const attachAttemptRef = useRef("");
@@ -87,8 +91,10 @@ function Workbench({
   const [draft, setDraft] = useState("");
   const composerInput = useRef<HTMLTextAreaElement>(null);
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState({ workspace: false, management: false, conversations: false });
   const navigationToggle = useRef<HTMLButtonElement>(null);
   const [openChatMenuId, setOpenChatMenuId] = useState<string | null>(null);
+  const [chatMenuPosition, setChatMenuPosition] = useState({ left: 0, top: 0 });
   const [taskAttempt, setTaskAttempt] = useState<{
     id: string;
     taskId: string;
@@ -118,6 +124,17 @@ function Workbench({
     return "tasks";
   });
   useEffect(() => { sessionStorage.setItem(`school-view:${user.id}`, schoolView); }, [schoolView, user.id]);
+  useEffect(() => {
+    const input = composerInput.current;
+    if (!input || workspace !== "chat") return;
+    const resize = () => {
+      input.style.height = "auto";
+      input.style.height = `${input.scrollHeight}px`;
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, [draft, workspace]);
   const { confirmDiscard, discardDialog } = useDiscardChanges();
   const [assistantDirty, setAssistantDirty] = useState(false);
   const [schoolDirty, setSchoolDirty] = useState(false);
@@ -133,42 +150,6 @@ function Workbench({
       if (next.preferredSubject !== previous.preferredSubject) sessionStorage.setItem(key, next.preferredSubject);
     });
   }, [user.id]);
-  const matchQuestion =
-    draft.trim() ||
-    [...store.activeMessages].reverse().find((m) => m.role === "user")
-      ?.content ||
-    "";
-  const [matchingQuestion, setMatchingQuestion] = useState(matchQuestion);
-  useEffect(() => {
-    const timer = window.setTimeout(
-      () => setMatchingQuestion(matchQuestion),
-      350,
-    );
-    return () => window.clearTimeout(timer);
-  }, [matchQuestion]);
-  const trainingMatches = useQuery({
-    queryKey: [
-      "training-match",
-      user.id,
-      matchingQuestion,
-      store.preferredSubject,
-      questionContext?.chapter_id,
-    ],
-    queryFn: () =>
-      api.matchTraining(
-        matchingQuestion,
-        store.preferredSubject,
-        questionContext?.chapter_id,
-      ),
-    enabled: workspace === "chat",
-    staleTime: 30000,
-    retry: false,
-  });
-  const practicePoints =
-    matchingQuestion === matchQuestion
-      ? trainingMatches.data?.matches || []
-      : [];
-
   const [reviewReturnId, setReviewReturnId] = useState("");
 
   function openAttempt(id: string) {
@@ -207,6 +188,15 @@ function Workbench({
   }, [workspace]);
 
   const chatsQuery = useQuery({ queryKey: ["chats"], queryFn: api.listChats });
+
+  useEffect(() => {
+    const updates = new EventSource("/api/events/chat-updates");
+    const refreshTitles = () => { void queryClient.invalidateQueries({ queryKey: ["chats"] }); };
+    updates.addEventListener("title_updated", refreshTitles);
+    updates.addEventListener("open", refreshTitles);
+    return () => updates.close();
+  }, [queryClient]);
+
   const activeChatQuery = useQuery({
     queryKey: ["chat", store.activeChatId],
     queryFn: () => api.getChat(store.activeChatId || ""),
@@ -217,8 +207,11 @@ function Workbench({
   useEffect(() => {
     if (chatsQuery.data?.chats) {
       store.setChats(chatsQuery.data.chats);
-      if (!store.activeChatId && chatsQuery.data.chats.length) {
-        store.setActiveChat(chatsQuery.data.chats[0]);
+      if (!initialChatSelected.current) {
+        initialChatSelected.current = true;
+        if (!store.activeChatId && chatsQuery.data.chats.length) {
+          store.setActiveChat(chatsQuery.data.chats[0]);
+        }
       }
     }
   }, [chatsQuery.data]);
@@ -251,7 +244,7 @@ function Workbench({
     mountedRef.current = true;
     function onPointerDown(event: PointerEvent) {
       const target = event.target as Element | null;
-      if (!target?.closest(".chat-menu-wrap")) setOpenChatMenuId(null);
+      if (!target?.closest(".chat-menu-wrap, .chat-menu")) setOpenChatMenuId(null);
     }
 
     function onKeyDown(event: KeyboardEvent) {
@@ -272,17 +265,33 @@ function Workbench({
     };
   }, []);
 
+  useEffect(() => {
+    if (!openChatMenuId) return;
+    const closeMenu = () => setOpenChatMenuId(null);
+    const onScroll = (event: Event) => {
+      if (!(event.target instanceof Element) || !event.target.closest(".chat-menu")) closeMenu();
+    };
+    window.addEventListener("resize", closeMenu);
+    document.addEventListener("scroll", onScroll, true);
+    return () => {
+      window.removeEventListener("resize", closeMenu);
+      document.removeEventListener("scroll", onScroll, true);
+    };
+  }, [openChatMenuId]);
+
   useEffect(() => () => resetStreamRenderer(), []);
 
-  const createChat = useMutation({
-    mutationFn: () => api.createChat(store.preferredMode),
-    onSuccess: (chat) => {
-      setQuestionContext(null);
-      setWorkspace("chat");
-      store.setActiveChat(chat);
-      queryClient.invalidateQueries({ queryKey: ["chats"] });
-    },
-  });
+  function startNewChat() {
+    initialChatSelected.current = true;
+    setQuestionContext(null);
+    setDraft("");
+    setNavigationError("");
+    setOpenChatMenuId(null);
+    setNavigationOpen(false);
+    setWorkspace("chat");
+    store.setActiveChat(null);
+    composerInput.current?.focus();
+  }
 
   const currentSubject = useMemo(
     () =>
@@ -305,33 +314,32 @@ function Workbench({
 
   async function sendMessage(extraPayload: Record<string, unknown> = {}) {
     const text = String(extraPayload.message || draft).trim();
-    if (!text || store.sending) return;
-    const chat = await ensureChat();
-    if (!mountedRef.current) return;
-    if (extraPayload.resume_run_id) {
-      try {
+    if (!text || useWorkbenchStore.getState().sending) return;
+    setDraft("");
+    store.setSending(true);
+    try {
+      const chat = await ensureChat();
+      if (!mountedRef.current) return;
+      if (extraPayload.resume_run_id) {
         const saved = await api.getChat(chat.chat_id);
         const messages = [...(saved.messages || [])];
         if (messages[messages.length - 1]?.details?.workflow_run_id === extraPayload.resume_run_id) {
           messages.splice(-2);
         }
         store.setActiveChat({ ...saved, messages });
-      } catch (error) {
-        setNavigationError(error instanceof Error ? error.message : String(error));
-        return;
       }
+      store.appendUserMessage(text);
+      const messageMode = extraPayload.mode === "instant" || extraPayload.mode === "deepsearch" ? extraPayload.mode : store.preferredMode;
+      store.startAssistantMessage(messageMode, store.preferredSubject);
+      await receiveStream(chat.chat_id, {
+        message: text, mode: messageMode, subjects: currentSubject.subjects,
+        ...(questionContext ? { learning_attempt_id: questionContext.attempt_id } : {}),
+        ...extraPayload,
+      });
+    } catch (error) {
+      store.setSending(false);
+      setNavigationError(error instanceof Error ? error.message : String(error));
     }
-    store.appendUserMessage(text);
-    const messageMode = extraPayload.mode === "instant" || extraPayload.mode === "deepsearch" ? extraPayload.mode : store.preferredMode;
-    store.startAssistantMessage(messageMode, store.preferredSubject);
-    store.setSending(true);
-    setDraft("");
-
-    await receiveStream(chat.chat_id, {
-      message: text, mode: messageMode, subjects: currentSubject.subjects,
-      ...(questionContext ? { learning_attempt_id: questionContext.attempt_id } : {}),
-      ...extraPayload,
-    });
   }
 
   async function attachStream(chat: ChatSession) {
@@ -511,9 +519,15 @@ function Workbench({
           </div>
         </div>
         <nav className="workspace-nav" aria-label="工作区">
-          <div className="nav-group-label">{teacher ? "教学工作区" : "学习工作区"}</div>
+          <button className={workspace === "assistant" ? "active" : ""} aria-current={workspace === "assistant" ? "page" : undefined} onClick={() => {
+            setWorkspace("assistant");
+            setNavigationOpen(false);
+            if (navigationOpen) navigationToggle.current?.focus();
+          }}><MessageSquarePlus size={18} aria-hidden="true" />个人助理</button>
+          <button type="button" className="nav-group-label nav-group-toggle" aria-expanded={!collapsedGroups.workspace} onClick={() => setCollapsedGroups(current => ({ ...current, workspace: !current.workspace }))}>
+            <ChevronDown size={14} aria-hidden="true" />{teacher ? "教学工作区" : "学习工作区"}
+          </button>
           {([
-            ["assistant", teacher ? "老师助理" : "个人助理", MessageSquarePlus],
             ...(teacher ? [
               ["reports", "班级学情", BarChart3],
               ["preparation", "备课安排", NotebookPen],
@@ -522,11 +536,16 @@ function Workbench({
             ] as const : [
               ["path", "课程进度", Route],
               ["tasks", "我的作业", ClipboardList],
-              ["training", "训练中心", BookOpen],
               ["review", "错题复习", RotateCcw],
               ["records", "学习记录", History],
               ["classes", "我的班级", GraduationCap],
             ] as const),
+            ...(user.role === "admin" ? [
+              ["path", "课程进度", Route],
+              ["review", "错题复习", RotateCcw],
+              ["records", "学习记录", History],
+            ] as const : []),
+            ["training", "训练中心", BookOpen],
             ["chat", "课程问答", MessageSquare],
             ...(teacher ? [
               ["content", "题库审核", BookOpen],
@@ -535,38 +554,44 @@ function Workbench({
           ] as const).map(([id, label, Icon]) => {
             const school = id === "reports" || id === "preparation" || id === "tasks" || id === "classes" || id === "content" || id === "grading";
             const active = school ? workspace === "school" && schoolView === id : workspace === id;
-            return <div key={id}>
-              {id === "content" && <div className="nav-group-label nav-management">教学管理</div>}
-              <button className={active ? "active" : ""} aria-current={active ? "page" : undefined} onClick={() => {
+            return <Fragment key={id}>
+              {id === "content" && <button type="button" className="nav-group-label nav-group-toggle nav-management" aria-expanded={!collapsedGroups.management} onClick={() => setCollapsedGroups(current => ({ ...current, management: !current.management }))}>
+                <ChevronDown size={14} aria-hidden="true" />教学管理
+              </button>}
+              <button hidden={id === "content" || id === "grading" ? collapsedGroups.management : collapsedGroups.workspace} className={active ? "active" : ""} aria-current={active ? "page" : undefined} onClick={() => {
                 if (school && id !== schoolView && schoolDirty) { confirmDiscard(() => { setSchoolView(id); setReturnTask(""); setWorkspace("school"); }); return; }
                 if (school) { setSchoolView(id); setReturnTask(""); setWorkspace("school"); }
                 else setWorkspace(id);
                 setNavigationOpen(false);
                 if (navigationOpen) navigationToggle.current?.focus();
               }}><Icon size={18} aria-hidden="true" />{label}</button>
-            </div>;
+            </Fragment>;
           })}
         </nav>
-        <div className="sidebar-conversations" hidden={workspace !== "chat"}>
+        <div className={`sidebar-conversations${collapsedGroups.conversations ? " is-collapsed" : ""}`}>
           <div className="conversation-heading">
-            <span className="nav-group-label">最近会话</span>
-            <button className="chat-menu-trigger" title="新建聊天" aria-label="新建聊天" disabled={createChat.isPending} onClick={() => createChat.mutate()}>
+            <button type="button" className="nav-group-label nav-group-toggle" aria-expanded={!collapsedGroups.conversations} aria-controls="recent-conversations" onClick={() => {
+              setCollapsedGroups(current => ({ ...current, conversations: !current.conversations }));
+              setOpenChatMenuId(null);
+            }}><ChevronDown size={14} aria-hidden="true" />最近会话</button>
+            <button className="chat-menu-trigger" title="新建聊天" aria-label="新建聊天" onClick={startNewChat}>
               <MessageSquarePlus size={18} />
             </button>
           </div>
+          <div id="recent-conversations" className="conversation-content" hidden={collapsedGroups.conversations}>
           {store.chats.length === 0 && <p className="sidebar-empty">还没有会话，输入问题即可开始。</p>}
         <div className="chat-list">
           {store.chats.map((chat) => (
             <div
               key={chat.chat_id}
-              className={`chat-row ${store.activeChatId === chat.chat_id ? "active" : ""}`}
+              className={`chat-row ${workspace === "chat" && store.activeChatId === chat.chat_id ? "active" : ""}`}
             >
-              <button className="chat-select" aria-current={store.activeChatId === chat.chat_id ? "true" : undefined} onClick={() => {
+              <button className="chat-select" aria-label={chat.title_pending ? "正在生成会话标题" : chat.title} aria-busy={chat.title_pending || undefined} aria-current={workspace === "chat" && store.activeChatId === chat.chat_id ? "true" : undefined} onClick={() => {
                 setWorkspace("chat");
                 setOpenChatMenuId(null);
                 setNavigationOpen(false);
                 if (store.activeChatId !== chat.chat_id) store.setActiveChat(chat);
-              }}>{chat.title}</button>
+              }}>{chat.title_pending ? <span className="chat-title-pending" aria-hidden="true" /> : chat.title}</button>
               <div
                 className="chat-menu-wrap"
                 onClick={(event) => event.stopPropagation()}
@@ -576,52 +601,63 @@ function Workbench({
                   aria-label="会话操作"
                   className="chat-menu-trigger"
                   type="button"
-                  onClick={() =>
-                    setOpenChatMenuId((current) =>
-                      current === chat.chat_id ? null : chat.chat_id,
-                    )
-                  }
+                  aria-haspopup="menu"
+                  onClick={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const menuHeight = 146;
+                    setChatMenuPosition({
+                      left: Math.max(8, Math.min(rect.right - 200, window.innerWidth - 208)),
+                      top: Math.max(8, rect.bottom + menuHeight + 6 <= window.innerHeight - 8
+                        ? rect.bottom + 6 : rect.top - menuHeight - 6),
+                    });
+                    setOpenChatMenuId((current) => current === chat.chat_id ? null : chat.chat_id);
+                  }}
                 >
                   <MoreHorizontal size={16} />
                 </button>
-                {openChatMenuId === chat.chat_id ? (
-                  <div className="chat-menu">
+                {openChatMenuId === chat.chat_id ? createPortal(
+                  <div className="chat-menu" role="menu" aria-label="会话操作" style={chatMenuPosition}>
                     <button
                       type="button"
-                      onClick={() => {
-                        setOpenChatMenuId(null);
-                        togglePin(chat);
-                      }}
-                    >
-                      <Pin size={14} />
-                      {chat.pinned ? "取消固定" : "固定会话"}
-                    </button>
-                    <button
-                      type="button"
+                      role="menuitem"
                       onClick={() => {
                         setOpenChatMenuId(null);
                         renameChat(chat);
                       }}
                     >
-                      <PencilLine size={14} />
+                      <PencilLine size={18} />
                       重命名
                     </button>
                     <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setOpenChatMenuId(null);
+                        togglePin(chat);
+                      }}
+                    >
+                      <Pin size={18} />
+                      {chat.pinned ? "取消置顶" : "置顶"}
+                    </button>
+                    <div className="chat-menu-divider" role="separator" />
+                    <button
                       className="danger"
                       type="button"
+                      role="menuitem"
                       onClick={() => {
                         setOpenChatMenuId(null);
                         deleteChat(chat);
                       }}
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={18} />
                       删除
                     </button>
-                  </div>
+                  </div>, document.body,
                 ) : null}
               </div>
             </div>
           ))}
+        </div>
         </div>
         </div>
         <div className="identity-status">
@@ -693,6 +729,12 @@ function Workbench({
                 <AnswerMessage
                   key={`${message.role}-${index}`}
                   message={message}
+                  question={[...store.activeMessages.slice(0, index)].reverse().find(item => item.role === "user")?.content || ""}
+                  userId={user.id}
+                  subject={store.preferredSubject}
+                  disabled={store.sending || openingExercise}
+                  onOpenExercise={openNewExercise}
+                  onOpenPath={() => setWorkspace("path")}
                 />
               ) : (
                 <article
@@ -757,64 +799,30 @@ function Workbench({
               {navigationError}
             </p>
           )}
-            <details className="related-training">
-              <summary>相关训练{practicePoints.length ? ` · ${practicePoints.length} 项` : ""}</summary>
-              <div className="chat-training-links">
-              {practicePoints.map((p) => (
-                <button
-                  key={p.id}
-                  title={`${p.reason}；关联目标：${p.objectives.join("；")}`}
-                  className="training-link"
-                  disabled={store.sending || openingExercise || !p.exercise_id}
-                  onClick={() => {
-                    if (p.exercise_id) openNewExercise(p.exercise_id);
-                  }}
-                >
-                  {p.title}
-                  {p.exercise_id ? "" : "（暂无新题）"}
-                </button>
-              ))}
-              {!practicePoints.length && (
-                <span>
-                  {trainingMatches.isError
-                    ? "训练匹配暂不可用"
-                    : trainingMatches.isFetching ||
-                        matchingQuestion !== matchQuestion
-                      ? "正在匹配训练…"
-                      : "暂未匹配到训练知识点"}
-                </span>
-              )}
-              <button
-                className="training-link"
-                disabled={store.sending}
-                onClick={() => setWorkspace("path")}
-              >
-                查看课程路径
-              </button>
-              </div>
-            </details>
-          <textarea
-            ref={composerInput}
-            aria-label="课程问题"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                sendMessage();
-              }
-            }}
-            placeholder="输入课程问题、题目或代码，按 Enter 发送"
-          />
-          <div className="composer-actions">
-            <span className="composer-hint">Enter 发送 · Shift + Enter 换行</span>
+          <div className="composer-input">
+            <textarea
+              ref={composerInput}
+              rows={1}
+              aria-label="课程问题"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  sendMessage();
+                }
+              }}
+              placeholder="输入课程问题、题目或代码"
+            />
             <button
               className="send-action"
+              type="button"
+              aria-label={store.sending ? (stopping ? "正在停止" : "停止生成") : "发送"}
+              title={store.sending ? (stopping ? "正在停止" : "停止生成") : "发送"}
               disabled={store.sending ? stopping : !draft.trim()}
               onClick={() => store.sending ? stopGeneration() : sendMessage()}
             >
-              <Send size={17} />
-              {store.sending ? (stopping ? "正在停止…" : "停止生成") : "发送"}
+              {store.sending ? <Square size={16} aria-hidden="true" /> : <ArrowUp size={20} aria-hidden="true" />}
             </button>
           </div>
         </footer>

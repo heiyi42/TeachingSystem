@@ -1,5 +1,11 @@
 import type { LearningAttempt, LearningRow } from "./learningTypes";
 
+export const COURSE_NAMES: Record<string, string> = {
+  C_program: "C 语言",
+  operating_systems: "操作系统",
+  cybersec_lab: "网络安全实验",
+};
+
 export interface SchoolUser {
   id: string;
   username: string;
@@ -168,6 +174,10 @@ export interface ClassReport {
 }
 
 export interface LessonPlan {
+  status?: "draft" | "confirmed";
+  source?: "assistant" | "preparation";
+  objectives?: string;
+  requirements?: string;
   id: string | null;
   revision: number;
   class_id: string;
@@ -183,6 +193,7 @@ export interface LessonPlan {
   exercises: Array<{ id: string; title: string; content_version: number }>;
   gaps: string[];
   material_available: boolean;
+  material_source?: { source: string; start_line: number; end_line: number; truncated: boolean } | null;
   baseline: {
     generated_at: number;
     member_count: number;
